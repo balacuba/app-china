@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug ChineseLearningApp",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build-ChineseLearningApp",
+      "program": "${workspaceFolder}/ChineseLearningApp/bin/Debug/net8.0-windows/ChineseLearningApp.exe",
+      "args": [],
+      "cwd": "${workspaceFolder}/ChineseLearningApp",
+      "console": "internalConsole",
+      "stopAtEntry": false
+    }
+  ]
+}
