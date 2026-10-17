@@ -282,6 +282,7 @@ public sealed partial class Form1 : Form
             SortMode = DataGridViewColumnSortMode.NotSortable
         });
         _grid.Columns.Add(CreateColumn(nameof(VocabularyWord.Chinese), "Tiếng Trung"));
+        _grid.Columns.Add(CreateColumn(nameof(VocabularyWord.HskLevel), "Cấp HSK"));
         _grid.Columns.Add(CreateColumn(nameof(VocabularyWord.Pinyin), "Pinyin"));
         _grid.Columns.Add(CreateColumn(nameof(VocabularyWord.Vietnamese), "Nghĩa tiếng Việt"));
         _grid.Columns.Add(CreateColumn(nameof(VocabularyWord.English), "Nghĩa tiếng Anh"));
@@ -303,7 +304,7 @@ public sealed partial class Form1 : Form
                  nameof(VocabularyWord.ChineseExample) or
                  nameof(VocabularyWord.EnglishGrammar) or
                  nameof(VocabularyWord.ChineseGrammar));
-            if (column.DataPropertyName == nameof(VocabularyWord.Chinese))
+            if (IsFilterableColumn(column.DataPropertyName))
             {
                 column.HeaderText = $"{column.HeaderText}  ▼";
             }
@@ -931,31 +932,49 @@ public sealed partial class Form1 : Form
                 ? ParseExcelFile(dialog.FileName)
                 : ParseFile(dialog.FileName);
             var updated = _words.ToList();
-            var knownWords = updated
-                .Select(item => item.Chinese.Trim())
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var knownWords = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (var index = 0; index < updated.Count; index++)
+            {
+                knownWords.TryAdd(updated[index].Chinese.Trim(), index);
+            }
+
             var importedCount = 0;
+            var enrichedCount = 0;
             var duplicateCount = 0;
             foreach (var word in imported)
             {
-                if (!knownWords.Add(word.Chinese.Trim()))
+                var key = word.Chinese.Trim();
+                if (knownWords.TryGetValue(key, out var existingIndex))
                 {
-                    duplicateCount++;
+                    var merged = MergeExamplesAndGrammar(updated[existingIndex], word);
+                    if (merged is null)
+                    {
+                        duplicateCount++;
+                    }
+                    else
+                    {
+                        updated[existingIndex] = merged;
+                        enrichedCount++;
+                    }
+
                     continue;
                 }
 
+                knownWords.Add(key, updated.Count);
                 updated.Add(word);
                 importedCount++;
             }
 
-            if (importedCount > 0 && !SaveAndReplace(updated))
+            if ((importedCount > 0 || enrichedCount > 0) && !SaveAndReplace(updated))
             {
                 return;
             }
 
             MessageBox.Show(
                 this,
-                $"Đã nhập {importedCount} từ vựng mới. Bỏ qua {duplicateCount} từ trùng lặp.",
+                $"Đã nhập {importedCount} từ vựng mới. " +
+                $"Bổ sung ví dụ/cấu trúc cho {enrichedCount} từ đã có. " +
+                $"Bỏ qua {duplicateCount} từ trùng lặp.",
                 "Kết quả nhập từ vựng",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
@@ -974,6 +993,37 @@ public sealed partial class Form1 : Form
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
+    }
+
+    private static VocabularyWord? MergeExamplesAndGrammar(VocabularyWord existing, VocabularyWord imported)
+    {
+        var merged = new VocabularyWord(
+            existing.Chinese,
+            existing.Pinyin,
+            existing.Vietnamese,
+            existing.English,
+            existing.Example,
+            existing.Grammar,
+            FillIfEmpty(existing.EnglishExample, imported.EnglishExample),
+            FillIfEmpty(existing.ChineseExample, imported.ChineseExample),
+            FillIfEmpty(existing.EnglishGrammar, imported.EnglishGrammar),
+            FillIfEmpty(existing.ChineseGrammar, imported.ChineseGrammar))
+        {
+            HskLevel = existing.HskLevel,
+            IsSelected = existing.IsSelected
+        };
+
+        var changed =
+            merged.EnglishExample != existing.EnglishExample ||
+            merged.ChineseExample != existing.ChineseExample ||
+            merged.EnglishGrammar != existing.EnglishGrammar ||
+            merged.ChineseGrammar != existing.ChineseGrammar;
+        return changed ? merged : null;
+
+        static string FillIfEmpty(string current, string incoming) =>
+            string.IsNullOrWhiteSpace(current) && !string.IsNullOrWhiteSpace(incoming)
+                ? incoming.Trim()
+                : current;
     }
 
     private static List<VocabularyWord> ParseFile(string path)
@@ -1750,14 +1800,23 @@ public sealed partial class Form1 : Form
             word.EnglishExample.Contains(searchText, StringComparison.CurrentCultureIgnoreCase) ||
             word.ChineseExample.Contains(searchText, StringComparison.CurrentCultureIgnoreCase) ||
             word.EnglishGrammar.Contains(searchText, StringComparison.CurrentCultureIgnoreCase) ||
-            word.ChineseGrammar.Contains(searchText, StringComparison.CurrentCultureIgnoreCase);
+            word.ChineseGrammar.Contains(searchText, StringComparison.CurrentCultureIgnoreCase) ||
+            word.HskLevel.Contains(searchText, StringComparison.CurrentCultureIgnoreCase);
     }
 
     private bool MatchesColumnFilters(VocabularyWord word)
     {
-        return !_columnFilters.TryGetValue(nameof(VocabularyWord.Chinese), out var chineseFilter) ||
-            chineseFilter.Contains(word.Chinese);
+        return _columnFilters.All(filter => filter.Value.Contains(GetFilterValue(word, filter.Key)));
     }
+
+    private static bool IsFilterableColumn(string propertyName) =>
+        propertyName is nameof(VocabularyWord.Chinese) or nameof(VocabularyWord.HskLevel);
+
+    private static string GetFilterValue(VocabularyWord word, string propertyName) => propertyName switch
+    {
+        nameof(VocabularyWord.HskLevel) => word.HskLevel,
+        _ => word.Chinese
+    };
 
     private void VocabularyGrid_ColumnHeaderMouseClick(
         object? sender,
@@ -1769,7 +1828,7 @@ public sealed partial class Form1 : Form
         }
 
         var column = _grid.Columns[e.ColumnIndex];
-        if (column.DataPropertyName != nameof(VocabularyWord.Chinese))
+        if (!IsFilterableColumn(column.DataPropertyName))
         {
             return;
         }
@@ -1781,7 +1840,7 @@ public sealed partial class Form1 : Form
     {
         var propertyName = column.DataPropertyName;
         var values = _words
-            .Select(word => word.Chinese)
+            .Select(word => GetFilterValue(word, propertyName))
             .Distinct(StringComparer.Ordinal)
             .OrderBy(value => value, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
@@ -1812,65 +1871,84 @@ public sealed partial class Form1 : Form
             Location = new Point(10, 44),
             Text = "Chọn tất cả"
         };
-        var optionsPanel = new Panel
+        // One list control instead of a checkbox per value: the word list can hold
+        // more values than the per-process window handle limit allows.
+        var optionsList = new CheckedListBox
         {
-            AutoScroll = true,
-            BorderStyle = BorderStyle.FixedSingle,
+            CheckOnClick = true,
+            IntegralHeight = false,
             Location = new Point(10, 70),
             Size = new Size(280, 230)
         };
-        var optionChecks = new List<(string Value, CheckBox CheckBox)>();
-        foreach (var value in values)
+        var updatingOptions = false;
+
+        static string DisplayText(string value) => string.IsNullOrEmpty(value) ? "(Trống)" : value;
+
+        void UpdateSelectAll()
         {
-            var checkBox = new CheckBox
+            selectAll.CheckState = checkedValues.Count switch
             {
-                AutoSize = true,
-                Checked = checkedValues.Contains(value),
-                Text = string.IsNullOrEmpty(value) ? "(Trống)" : value,
-                Tag = value
+                0 => CheckState.Unchecked,
+                _ when checkedValues.Count == values.Count => CheckState.Checked,
+                _ => CheckState.Indeterminate
             };
-            optionsPanel.Controls.Add(checkBox);
-            optionChecks.Add((value, checkBox));
         }
 
         void UpdateOptions()
         {
             var query = search.Text.Trim();
-            var visibleIndex = 0;
-            foreach (var option in optionChecks)
+            updatingOptions = true;
+            optionsList.BeginUpdate();
+            try
             {
-                option.CheckBox.Visible = option.CheckBox.Text.Contains(
-                    query,
-                    StringComparison.CurrentCultureIgnoreCase);
-                if (option.CheckBox.Visible)
+                optionsList.Items.Clear();
+                foreach (var value in values.Where(value =>
+                             DisplayText(value).Contains(query, StringComparison.CurrentCultureIgnoreCase)))
                 {
-                    option.CheckBox.Location = new Point(8, 4 + visibleIndex * 25);
-                    visibleIndex++;
+                    optionsList.Items.Add(new FilterOption(value, DisplayText(value)), checkedValues.Contains(value));
                 }
             }
-
-            var selectedCount = optionChecks.Count(option => option.CheckBox.Checked);
-            selectAll.CheckState = selectedCount switch
+            finally
             {
-                0 => CheckState.Unchecked,
-                _ when selectedCount == optionChecks.Count => CheckState.Checked,
-                _ => CheckState.Indeterminate
-            };
+                optionsList.EndUpdate();
+                updatingOptions = false;
+            }
+
+            UpdateSelectAll();
         }
 
         search.TextChanged += (_, _) => UpdateOptions();
-        foreach (var option in optionChecks)
+        optionsList.ItemCheck += (_, e) =>
         {
-            option.CheckBox.CheckedChanged += (_, _) => UpdateOptions();
-        }
+            if (updatingOptions || optionsList.Items[e.Index] is not FilterOption option)
+            {
+                return;
+            }
+
+            if (e.NewValue == CheckState.Checked)
+            {
+                checkedValues.Add(option.Value);
+            }
+            else
+            {
+                checkedValues.Remove(option.Value);
+            }
+
+            UpdateSelectAll();
+        };
 
         selectAll.Click += (_, _) =>
         {
-            var selectEverything = optionChecks.Any(option => !option.CheckBox.Checked);
-            foreach (var option in optionChecks)
+            if (checkedValues.Count < values.Count)
             {
-                option.CheckBox.Checked = selectEverything;
+                checkedValues.UnionWith(values);
             }
+            else
+            {
+                checkedValues.Clear();
+            }
+
+            UpdateOptions();
         };
 
         var apply = new Button
@@ -1881,10 +1959,7 @@ public sealed partial class Form1 : Form
         };
         apply.Click += (_, _) =>
         {
-            var selected = optionChecks
-                .Where(option => option.CheckBox.Checked)
-                .Select(option => option.Value)
-                .ToHashSet(StringComparer.Ordinal);
+            var selected = new HashSet<string>(checkedValues, StringComparer.Ordinal);
             if (selected.Count == values.Count)
             {
                 _columnFilters.Remove(propertyName);
@@ -1913,7 +1988,7 @@ public sealed partial class Form1 : Form
             RefreshVocabulary();
         };
 
-        panel.Controls.AddRange([search, selectAll, optionsPanel, clear, apply]);
+        panel.Controls.AddRange([search, selectAll, optionsList, clear, apply]);
         dropDown.Items.Add(new ToolStripControlHost(panel)
         {
             AutoSize = false,
@@ -3041,6 +3116,11 @@ public sealed partial class Form1 : Form
         new("明天", "míngtiān", "ngày mai", "tomorrow")
     ];
 
+    private sealed record FilterOption(string Value, string Text)
+    {
+        public override string ToString() => Text;
+    }
+
     private sealed class VocabularyWord
     {
         public VocabularyWord()
@@ -3081,6 +3161,7 @@ public sealed partial class Form1 : Form
         public string ChineseExample { get; set; } = string.Empty;
         public string EnglishGrammar { get; set; } = string.Empty;
         public string ChineseGrammar { get; set; } = string.Empty;
+        public string HskLevel { get; set; } = string.Empty;
         [JsonIgnore]
         public bool IsSelected { get; set; }
     }
