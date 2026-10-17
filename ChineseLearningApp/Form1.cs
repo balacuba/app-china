@@ -324,7 +324,7 @@ public sealed partial class Form1 : Form
         var hint = new Label
         {
             Dock = DockStyle.Fill,
-            Text = "Tích chọn những từ muốn học. Flashcard và luyện gõ chỉ dùng các từ đã tích; tìm kiếm và bộ lọc chỉ thay đổi danh sách hiển thị.",
+            Text = "Tích chọn những từ muốn học. Flashcard và luyện gõ chỉ dùng các từ đã tích. Nút tích/bỏ tích tất cả chỉ áp dụng cho các từ đang hiển thị sau khi tìm kiếm và lọc.",
             ForeColor = Color.FromArgb(90, 100, 112),
             TextAlign = ContentAlignment.MiddleLeft
         };
@@ -2055,9 +2055,11 @@ public sealed partial class Form1 : Form
     private void ClearWordSelection(object? sender, EventArgs e) =>
         SetWordSelection(false);
 
+    // Applies only to the rows left by search and column filters, so a filter
+    // such as "HSK 1" can be used to tick exactly that group of words.
     private void SetWordSelection(bool selected)
     {
-        foreach (var word in _words)
+        foreach (var word in _visibleWords)
         {
             word.IsSelected = selected;
         }
