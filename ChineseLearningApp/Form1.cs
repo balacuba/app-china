@@ -289,6 +289,7 @@ public sealed partial class Form1 : Form
         _grid.Columns.Add(CreateColumn(nameof(VocabularyWord.EnglishExample), "Ví dụ tiếng Anh"));
         _grid.Columns.Add(CreateColumn(nameof(VocabularyWord.ChineseExample), "Ví dụ tiếng Trung"));
         _grid.Columns.Add(CreateColumn(nameof(VocabularyWord.EnglishGrammar), "Ngữ pháp"));
+        _grid.Columns.Add(CreateColumn(nameof(VocabularyWord.VietnameseGrammar), "Ngữ pháp tiếng Việt"));
         ApplyColumnOrder();
         foreach (DataGridViewColumn column in _grid.Columns)
         {
@@ -301,7 +302,8 @@ public sealed partial class Form1 : Form
                 (nameof(VocabularyWord.IsSelected) or
                  nameof(VocabularyWord.EnglishExample) or
                  nameof(VocabularyWord.ChineseExample) or
-                 nameof(VocabularyWord.EnglishGrammar));
+                 nameof(VocabularyWord.EnglishGrammar) or
+                 nameof(VocabularyWord.VietnameseGrammar));
             if (IsFilterableColumn(column.DataPropertyName))
             {
                 column.HeaderText = $"{column.HeaderText}  ▼";
@@ -1007,6 +1009,7 @@ public sealed partial class Form1 : Form
             FillIfEmpty(existing.EnglishGrammar, imported.EnglishGrammar),
             FillIfEmpty(existing.ChineseGrammar, imported.ChineseGrammar))
         {
+            VietnameseGrammar = FillIfEmpty(existing.VietnameseGrammar, imported.VietnameseGrammar),
             HskLevel = existing.HskLevel,
             IsSelected = existing.IsSelected
         };
@@ -1015,6 +1018,7 @@ public sealed partial class Form1 : Form
             merged.EnglishExample != existing.EnglishExample ||
             merged.ChineseExample != existing.ChineseExample ||
             merged.EnglishGrammar != existing.EnglishGrammar ||
+            merged.VietnameseGrammar != existing.VietnameseGrammar ||
             merged.ChineseGrammar != existing.ChineseGrammar;
         return changed ? merged : null;
 
@@ -1147,7 +1151,10 @@ public sealed partial class Form1 : Form
                 englishExample.Trim(),
                 chineseExample.Trim(),
                 englishGrammar.Trim(),
-                chineseGrammar.Trim());
+                chineseGrammar.Trim())
+            {
+                VietnameseGrammar = GetHeaderField(fields, headers, "vietnameseGrammar").Trim()
+            };
             MoveLegacyNotes(word);
             result.Add(word);
         }
@@ -1283,7 +1290,10 @@ public sealed partial class Form1 : Form
                 englishExample,
                 chineseExample,
                 englishGrammar,
-                chineseGrammar);
+                chineseGrammar)
+            {
+                VietnameseGrammar = GetExcelField(cells, headers, hasHeader, "vietnameseGrammar", -1)
+            };
             MoveLegacyNotes(word);
             result.Add(word);
         }
@@ -1503,6 +1513,11 @@ public sealed partial class Form1 : Form
             return "englishGrammar";
         }
 
+        if (normalized is "vietnamese grammar" or "grammar vietnamese" or "ngu phap tieng viet" or "cau truc tieng viet")
+        {
+            return "vietnameseGrammar";
+        }
+
         if (normalized is "chinese grammar" or "grammar chinese" or "ngu phap tieng trung" or "cau truc tieng trung")
         {
             return "chineseGrammar";
@@ -1561,7 +1576,7 @@ public sealed partial class Form1 : Form
             MinimizeBox = false,
             ShowInTaskbar = false,
             StartPosition = FormStartPosition.CenterParent,
-            ClientSize = new Size(430, 412),
+            ClientSize = new Size(430, 460),
             Font = new Font("Segoe UI", 10F)
         };
         var inputs = new[]
@@ -1572,13 +1587,14 @@ public sealed partial class Form1 : Form
             AddEntryRow(dialog, 3, "Nghĩa tiếng Anh", null),
             AddEntryRow(dialog, 4, "Ví dụ tiếng Anh", null),
             AddEntryRow(dialog, 5, "Ví dụ tiếng Trung", new Font("Microsoft YaHei UI", 11F)),
-            AddEntryRow(dialog, 6, "Ngữ pháp", new Font("Microsoft YaHei UI", 11F))
+            AddEntryRow(dialog, 6, "Ngữ pháp", new Font("Microsoft YaHei UI", 11F)),
+            AddEntryRow(dialog, 7, "Ngữ pháp tiếng Việt", new Font("Microsoft YaHei UI", 11F))
         };
         var buttons = new FlowLayoutPanel
         {
             AutoSize = true,
             FlowDirection = FlowDirection.RightToLeft,
-            Location = new Point(244, 356)
+            Location = new Point(244, 404)
         };
         var save = new Button { AutoSize = true, Text = "Lưu" };
         var cancel = new Button { AutoSize = true, Text = "Hủy", DialogResult = DialogResult.Cancel };
@@ -1604,7 +1620,10 @@ public sealed partial class Form1 : Form
                 string.Empty,
                 inputs[4].Text.Trim(),
                 inputs[5].Text.Trim(),
-                inputs[6].Text.Trim());
+                inputs[6].Text.Trim())
+            {
+                VietnameseGrammar = inputs[7].Text.Trim()
+            };
             var updated = _words.ToList();
             var existing = updated.FindIndex(item =>
                 string.Equals(item.Chinese, word.Chinese, StringComparison.OrdinalIgnoreCase));
@@ -1796,6 +1815,7 @@ public sealed partial class Form1 : Form
             word.EnglishExample.Contains(searchText, StringComparison.CurrentCultureIgnoreCase) ||
             word.ChineseExample.Contains(searchText, StringComparison.CurrentCultureIgnoreCase) ||
             word.EnglishGrammar.Contains(searchText, StringComparison.CurrentCultureIgnoreCase) ||
+            word.VietnameseGrammar.Contains(searchText, StringComparison.CurrentCultureIgnoreCase) ||
             word.HskLevel.Contains(searchText, StringComparison.CurrentCultureIgnoreCase);
     }
 
@@ -2139,7 +2159,8 @@ public sealed partial class Form1 : Form
         if (column.DataPropertyName is not
             (nameof(VocabularyWord.EnglishExample) or
              nameof(VocabularyWord.ChineseExample) or
-             nameof(VocabularyWord.EnglishGrammar)))
+             nameof(VocabularyWord.EnglishGrammar) or
+             nameof(VocabularyWord.VietnameseGrammar)))
         {
             _editingVocabularyCellValue = null;
             return;
@@ -2180,9 +2201,9 @@ public sealed partial class Form1 : Form
         {
             word.EnglishGrammar = value;
         }
-        else if (propertyName == nameof(VocabularyWord.ChineseGrammar))
+        else if (propertyName == nameof(VocabularyWord.VietnameseGrammar))
         {
-            word.ChineseGrammar = value;
+            word.VietnameseGrammar = value;
         }
     }
 
@@ -2201,6 +2222,7 @@ public sealed partial class Form1 : Form
             nameof(VocabularyWord.EnglishExample) => word.EnglishExample,
             nameof(VocabularyWord.ChineseExample) => word.ChineseExample,
             nameof(VocabularyWord.EnglishGrammar) => word.EnglishGrammar,
+            nameof(VocabularyWord.VietnameseGrammar) => word.VietnameseGrammar,
             _ => string.Empty
         };
         if (string.IsNullOrWhiteSpace(text))
@@ -2211,7 +2233,7 @@ public sealed partial class Form1 : Form
         var languageId = propertyName switch
         {
             nameof(VocabularyWord.Chinese) => 0x0004,
-            nameof(VocabularyWord.Vietnamese) => 0x002A,
+            nameof(VocabularyWord.Vietnamese) or nameof(VocabularyWord.VietnameseGrammar) => 0x002A,
             nameof(VocabularyWord.English) => 0x0009,
             nameof(VocabularyWord.EnglishExample) or nameof(VocabularyWord.EnglishGrammar) => 0x0009,
             nameof(VocabularyWord.ChineseExample) => 0x0004,
@@ -2962,6 +2984,11 @@ public sealed partial class Form1 : Form
             details.Add($"Ngữ pháp: {word.EnglishGrammar}");
         }
 
+        if (!string.IsNullOrWhiteSpace(word.VietnameseGrammar))
+        {
+            details.Add($"Ngữ pháp tiếng Việt: {word.VietnameseGrammar}");
+        }
+
         return string.Join(Environment.NewLine, details);
     }
 
@@ -3151,6 +3178,7 @@ public sealed partial class Form1 : Form
         public string EnglishExample { get; set; } = string.Empty;
         public string ChineseExample { get; set; } = string.Empty;
         public string EnglishGrammar { get; set; } = string.Empty;
+        public string VietnameseGrammar { get; set; } = string.Empty;
         public string ChineseGrammar { get; set; } = string.Empty;
         public string HskLevel { get; set; } = string.Empty;
         [JsonIgnore]
