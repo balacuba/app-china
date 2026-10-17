@@ -21,6 +21,8 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayIcon={app}\{#MyAppExeName}
+CloseApplications=yes
+CloseApplicationsFilter={#MyAppExeName}
 
 [Tasks]
 Name: "desktopicon"; Description: "Tạo lối tắt ngoài Desktop"; GroupDescription: "Lối tắt:"; Flags: unchecked

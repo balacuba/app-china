@@ -744,11 +744,12 @@ public sealed partial class Form1 : Form
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink
         };
+        buttons.Controls.Add(CreateButton("🔊 Đọc từ", SpeakFlashcardWord));
         buttons.Controls.Add(CreateButton("Từ tiếp theo →", (_, _) => MoveFlashcard(1), secondary: true));
 
         var instruction = new Label
         {
-            Text = "Nhấn vào thẻ để lật và xem pinyin, nghĩa tiếng Việt và tiếng Anh.",
+            Text = "Nhấn vào thẻ để xem nghĩa hoặc nhấn “Đọc từ” để nghe phát âm tiếng Trung.",
             Dock = DockStyle.Fill,
             ForeColor = Color.FromArgb(90, 100, 112),
             TextAlign = ContentAlignment.TopCenter
@@ -930,29 +931,32 @@ public sealed partial class Form1 : Form
                 ? ParseExcelFile(dialog.FileName)
                 : ParseFile(dialog.FileName);
             var updated = _words.ToList();
+            var knownWords = updated
+                .Select(item => item.Chinese.Trim())
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var importedCount = 0;
+            var duplicateCount = 0;
             foreach (var word in imported)
             {
-                var existing = updated.FindIndex(item =>
-                    string.Equals(item.Chinese, word.Chinese, StringComparison.OrdinalIgnoreCase));
-                if (existing >= 0)
+                if (!knownWords.Add(word.Chinese.Trim()))
                 {
-                    updated[existing] = word;
+                    duplicateCount++;
+                    continue;
                 }
-                else
-                {
-                    updated.Add(word);
-                }
+
+                updated.Add(word);
+                importedCount++;
             }
 
-            if (!SaveAndReplace(updated))
+            if (importedCount > 0 && !SaveAndReplace(updated))
             {
                 return;
             }
 
             MessageBox.Show(
                 this,
-                $"Đã nhập {imported.Count} từ vựng.",
-                "Nhập thành công",
+                $"Đã nhập {importedCount} từ vựng mới. Bỏ qua {duplicateCount} từ trùng lặp.",
+                "Kết quả nhập từ vựng",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
         }
@@ -1105,10 +1109,7 @@ public sealed partial class Form1 : Form
             throw new FormatException("Tệp không có từ vựng nào để nhập.");
         }
 
-        return result
-            .GroupBy(word => word.Chinese, StringComparer.OrdinalIgnoreCase)
-            .Select(group => group.Last())
-            .ToList();
+        return result;
     }
 
     private static List<VocabularyWord> ParseExcelFile(string path)
@@ -1244,10 +1245,7 @@ public sealed partial class Form1 : Form
             throw new FormatException("Tệp Excel không có từ vựng nào để nhập.");
         }
 
-        return result
-            .GroupBy(word => word.Chinese, StringComparer.OrdinalIgnoreCase)
-            .Select(group => group.Last())
-            .ToList();
+        return result;
     }
 
     private static XDocument LoadExcelXml(ZipArchive archive, string entryName)
@@ -2338,6 +2336,16 @@ public sealed partial class Form1 : Form
 
         _flashcardAnimationFrame = 0;
         _flashcardFlipTimer.Start();
+    }
+
+    private void SpeakFlashcardWord(object? sender, EventArgs e)
+    {
+        if (_studyWords.Count == 0)
+        {
+            return;
+        }
+
+        SpeakVocabularyCell(_studyWords[_flashcardIndex], nameof(VocabularyWord.Chinese));
     }
 
     private void FlashcardFlipTimer_Tick(object? sender, EventArgs e)
