@@ -288,8 +288,7 @@ public sealed partial class Form1 : Form
         _grid.Columns.Add(CreateColumn(nameof(VocabularyWord.English), "Nghĩa tiếng Anh"));
         _grid.Columns.Add(CreateColumn(nameof(VocabularyWord.EnglishExample), "Ví dụ tiếng Anh"));
         _grid.Columns.Add(CreateColumn(nameof(VocabularyWord.ChineseExample), "Ví dụ tiếng Trung"));
-        _grid.Columns.Add(CreateColumn(nameof(VocabularyWord.EnglishGrammar), "Ngữ pháp tiếng Anh"));
-        _grid.Columns.Add(CreateColumn(nameof(VocabularyWord.ChineseGrammar), "Ngữ pháp tiếng Trung"));
+        _grid.Columns.Add(CreateColumn(nameof(VocabularyWord.EnglishGrammar), "Ngữ pháp"));
         ApplyColumnOrder();
         foreach (DataGridViewColumn column in _grid.Columns)
         {
@@ -302,8 +301,7 @@ public sealed partial class Form1 : Form
                 (nameof(VocabularyWord.IsSelected) or
                  nameof(VocabularyWord.EnglishExample) or
                  nameof(VocabularyWord.ChineseExample) or
-                 nameof(VocabularyWord.EnglishGrammar) or
-                 nameof(VocabularyWord.ChineseGrammar));
+                 nameof(VocabularyWord.EnglishGrammar));
             if (IsFilterableColumn(column.DataPropertyName))
             {
                 column.HeaderText = $"{column.HeaderText}  ▼";
@@ -1563,7 +1561,7 @@ public sealed partial class Form1 : Form
             MinimizeBox = false,
             ShowInTaskbar = false,
             StartPosition = FormStartPosition.CenterParent,
-            ClientSize = new Size(430, 460),
+            ClientSize = new Size(430, 412),
             Font = new Font("Segoe UI", 10F)
         };
         var inputs = new[]
@@ -1574,14 +1572,13 @@ public sealed partial class Form1 : Form
             AddEntryRow(dialog, 3, "Nghĩa tiếng Anh", null),
             AddEntryRow(dialog, 4, "Ví dụ tiếng Anh", null),
             AddEntryRow(dialog, 5, "Ví dụ tiếng Trung", new Font("Microsoft YaHei UI", 11F)),
-            AddEntryRow(dialog, 6, "Ngữ pháp tiếng Anh", null),
-            AddEntryRow(dialog, 7, "Ngữ pháp tiếng Trung", new Font("Microsoft YaHei UI", 11F))
+            AddEntryRow(dialog, 6, "Ngữ pháp", new Font("Microsoft YaHei UI", 11F))
         };
         var buttons = new FlowLayoutPanel
         {
             AutoSize = true,
             FlowDirection = FlowDirection.RightToLeft,
-            Location = new Point(244, 404)
+            Location = new Point(244, 356)
         };
         var save = new Button { AutoSize = true, Text = "Lưu" };
         var cancel = new Button { AutoSize = true, Text = "Hủy", DialogResult = DialogResult.Cancel };
@@ -1607,8 +1604,7 @@ public sealed partial class Form1 : Form
                 string.Empty,
                 inputs[4].Text.Trim(),
                 inputs[5].Text.Trim(),
-                inputs[6].Text.Trim(),
-                inputs[7].Text.Trim());
+                inputs[6].Text.Trim());
             var updated = _words.ToList();
             var existing = updated.FindIndex(item =>
                 string.Equals(item.Chinese, word.Chinese, StringComparison.OrdinalIgnoreCase));
@@ -1649,7 +1645,7 @@ public sealed partial class Form1 : Form
             Location = new Point(168, 18 + index * 48),
             Size = new Size(240, 32),
             Font = inputFont ?? dialog.Font,
-            ImeMode = index is 0 or 5 or 7 ? ImeMode.On : ImeMode.NoControl
+            ImeMode = index is 0 or 5 ? ImeMode.On : ImeMode.NoControl
         };
         dialog.Controls.Add(label);
         dialog.Controls.Add(input);
@@ -1800,7 +1796,6 @@ public sealed partial class Form1 : Form
             word.EnglishExample.Contains(searchText, StringComparison.CurrentCultureIgnoreCase) ||
             word.ChineseExample.Contains(searchText, StringComparison.CurrentCultureIgnoreCase) ||
             word.EnglishGrammar.Contains(searchText, StringComparison.CurrentCultureIgnoreCase) ||
-            word.ChineseGrammar.Contains(searchText, StringComparison.CurrentCultureIgnoreCase) ||
             word.HskLevel.Contains(searchText, StringComparison.CurrentCultureIgnoreCase);
     }
 
@@ -2124,8 +2119,7 @@ public sealed partial class Form1 : Form
 
         textBox.ImeMode = cell.OwningColumn.DataPropertyName is
             nameof(VocabularyWord.Chinese) or
-            nameof(VocabularyWord.ChineseExample) or
-            nameof(VocabularyWord.ChineseGrammar)
+            nameof(VocabularyWord.ChineseExample)
                 ? ImeMode.On
                 : ImeMode.NoControl;
     }
@@ -2145,8 +2139,7 @@ public sealed partial class Form1 : Form
         if (column.DataPropertyName is not
             (nameof(VocabularyWord.EnglishExample) or
              nameof(VocabularyWord.ChineseExample) or
-             nameof(VocabularyWord.EnglishGrammar) or
-             nameof(VocabularyWord.ChineseGrammar)))
+             nameof(VocabularyWord.EnglishGrammar)))
         {
             _editingVocabularyCellValue = null;
             return;
@@ -2208,7 +2201,6 @@ public sealed partial class Form1 : Form
             nameof(VocabularyWord.EnglishExample) => word.EnglishExample,
             nameof(VocabularyWord.ChineseExample) => word.ChineseExample,
             nameof(VocabularyWord.EnglishGrammar) => word.EnglishGrammar,
-            nameof(VocabularyWord.ChineseGrammar) => word.ChineseGrammar,
             _ => string.Empty
         };
         if (string.IsNullOrWhiteSpace(text))
@@ -2222,7 +2214,7 @@ public sealed partial class Form1 : Form
             nameof(VocabularyWord.Vietnamese) => 0x002A,
             nameof(VocabularyWord.English) => 0x0009,
             nameof(VocabularyWord.EnglishExample) or nameof(VocabularyWord.EnglishGrammar) => 0x0009,
-            nameof(VocabularyWord.ChineseExample) or nameof(VocabularyWord.ChineseGrammar) => 0x0004,
+            nameof(VocabularyWord.ChineseExample) => 0x0004,
             _ => 0
         };
 
@@ -2967,12 +2959,7 @@ public sealed partial class Form1 : Form
 
         if (!string.IsNullOrWhiteSpace(word.EnglishGrammar))
         {
-            details.Add($"Ngữ pháp tiếng Anh: {word.EnglishGrammar}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(word.ChineseGrammar))
-        {
-            details.Add($"Ngữ pháp tiếng Trung: {word.ChineseGrammar}");
+            details.Add($"Ngữ pháp: {word.EnglishGrammar}");
         }
 
         return string.Join(Environment.NewLine, details);
@@ -3073,21 +3060,23 @@ public sealed partial class Form1 : Form
             changed = true;
         }
 
+        // Grammar is shown in a single column (EnglishGrammar: English labels with
+        // the Chinese words); older or imported notes fill it when it is empty.
         if (!string.IsNullOrWhiteSpace(word.Grammar))
         {
-            if (ContainsChinese(word.Grammar))
-            {
-                if (string.IsNullOrWhiteSpace(word.ChineseGrammar))
-                {
-                    word.ChineseGrammar = word.Grammar;
-                }
-            }
-            else if (string.IsNullOrWhiteSpace(word.EnglishGrammar))
+            if (string.IsNullOrWhiteSpace(word.EnglishGrammar))
             {
                 word.EnglishGrammar = word.Grammar;
             }
 
             word.Grammar = string.Empty;
+            changed = true;
+        }
+
+        if (string.IsNullOrWhiteSpace(word.EnglishGrammar) &&
+            !string.IsNullOrWhiteSpace(word.ChineseGrammar))
+        {
+            word.EnglishGrammar = word.ChineseGrammar;
             changed = true;
         }
 
