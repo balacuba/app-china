@@ -900,6 +900,8 @@ public sealed partial class Form1 : Form
         studyWordsButton.AutoSize = false;
         studyWordsButton.Size = new Size(210, 40);
         studyWordsButton.Margin = new Padding(0, 4, 12, 0);
+        studyWordsButton.MouseEnter += (_, _) => ShowStudyWordMenu(studyWordsButton);
+        studyWordsButton.MouseMove += (_, _) => ShowStudyWordMenu(studyWordsButton);
         studyWordsButton.Click += (_, _) => ShowStudyWordMenu(studyWordsButton);
         searchRow.Controls.Add(BuildHskFilterButton());
         searchRow.Controls.Add(studyWordsButton);
@@ -3433,13 +3435,22 @@ public sealed partial class Form1 : Form
     // each with its study tick, plus tick-all / untick-all for those words. It
     // drops down under its pill as a rounded card: title, rounded search box,
     // rounded list with rounded tick boxes.
+    private ToolStripDropDown? _studyWordMenu;
+
     private void ShowStudyWordMenu(Control anchor)
     {
+        // Opened by hovering the pill; only one at a time.
+        if (_studyWordMenu is { IsDisposed: false, Visible: true })
+        {
+            return;
+        }
+
         // As wide as its pill; the two buttons stack under the list.
         var menuWidth = anchor.Width;
         const int menuHeight = 492;
         const int side = 10;
-        var dropDown = new ToolStripDropDown { AutoClose = true, Padding = Padding.Empty, DropShadowEnabled = true };
+        var dropDown = new ToolStripDropDown { AutoClose = false, Padding = Padding.Empty, DropShadowEnabled = true };
+        _studyWordMenu = dropDown;
         var card = new RoundedPanel
         {
             Size = new Size(menuWidth, menuHeight),
@@ -3656,7 +3667,24 @@ public sealed partial class Form1 : Form
         };
         FillList();
 
+        // Like the HSK filter: fold the card away once the pointer is off both
+        // the pill and the card.
+        var watch = new System.Windows.Forms.Timer { Interval = 150 };
+        watch.Tick += (_, _) =>
+        {
+            var cursor = Cursor.Position;
+            var overPill = !anchor.IsDisposed &&
+                Rectangle.Inflate(anchor.RectangleToScreen(anchor.ClientRectangle), 8, 8).Contains(cursor);
+            var overCard = dropDown.Visible && Rectangle.Inflate(dropDown.Bounds, 8, 8).Contains(cursor);
+            if (!overPill && !overCard)
+            {
+                watch.Stop();
+                watch.Dispose();
+                dropDown.Close();
+            }
+        };
         dropDown.Show(anchor.PointToScreen(new Point(0, anchor.Height + 4)));
+        watch.Start();
     }
 
     private sealed record StudyWordOption(VocabularyWord Word)
