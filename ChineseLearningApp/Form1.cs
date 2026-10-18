@@ -844,20 +844,131 @@ public sealed partial class Form1 : Form
             WrapContents = false,
             Padding = Padding.Empty
         };
-        searchRow.Controls.Add(new Label
+        // Search: a rounded "Tìm từ" pill that opens into a rounded search box.
+        // The box closes back into the pill when it is empty and loses focus.
+        const int searchOpenWidth = 420;
+        var searchButton = CreateButton("🔍  Tìm từ", (_, _) => { }, secondary: true);
+        searchButton.AutoSize = false;
+        searchButton.Size = new Size(130, 40);
+        searchButton.Margin = new Padding(0, 4, 16, 0);
+        var searchFrame = new RoundedPanel
         {
-            AutoSize = true,
-            Text = "🔍 Tìm từ:",
-            ForeColor = BodyTextColor,
-            Margin = new Padding(0, 9, 8, 0)
-        });
-        _searchBox.Width = 320;
+            Size = new Size(searchOpenWidth, 40),
+            Radius = 18,
+            FillColor = SurfaceColor,
+            OutlineColor = BorderColor,
+            OutlineWidth = 1.5F,
+            BackColor = PageColor,
+            Margin = new Padding(0, 4, 16, 0),
+            Visible = false
+        };
+        var searchIcon = new Label
+        {
+            AutoSize = false,
+            Location = new Point(12, 9),
+            Size = new Size(24, 22),
+            Text = "🔍",
+            Font = new Font("Segoe UI Emoji", 10.5F),
+            ForeColor = MutedTextColor,
+            BackColor = SurfaceColor,
+            TextAlign = ContentAlignment.MiddleCenter
+        };
+        _searchBox.BorderStyle = BorderStyle.None;
+        _searchBox.BackColor = SurfaceColor;
         _searchBox.Font = new Font(UiFontName, 11F);
-        _searchBox.BorderStyle = BorderStyle.FixedSingle;
         _searchBox.PlaceholderText = "Tiếng Trung, pinyin, nghĩa, ví dụ...";
-        _searchBox.Margin = new Padding(0, 4, 16, 0);
-        _searchBox.TextChanged += (_, _) => RefreshVocabulary();
-        searchRow.Controls.Add(_searchBox);
+        _searchBox.Location = new Point(42, 10);
+        _searchBox.Width = searchOpenWidth - 42 - 40;
+        _searchBox.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
+        var clearSearch = new Label
+        {
+            AutoSize = false,
+            Size = new Size(26, 26),
+            Location = new Point(searchOpenWidth - 36, 7),
+            Anchor = AnchorStyles.Top | AnchorStyles.Right,
+            Text = "✕",
+            Font = new Font(UiFontName, 10F, FontStyle.Bold),
+            ForeColor = MutedTextColor,
+            BackColor = SurfaceColor,
+            TextAlign = ContentAlignment.MiddleCenter,
+            Cursor = Cursors.Hand,
+            Visible = false
+        };
+        searchFrame.Controls.AddRange([searchIcon, _searchBox, clearSearch]);
+        searchRow.Controls.Add(searchButton);
+        searchRow.Controls.Add(searchFrame);
+
+        // Opening widens the box over a few frames, then focuses it.
+        var searchAnimation = new System.Windows.Forms.Timer { Interval = 12 };
+        searchAnimation.Tick += (_, _) =>
+        {
+            searchFrame.Width = Math.Min(searchOpenWidth, searchFrame.Width + 48);
+            if (searchFrame.Width >= searchOpenWidth)
+            {
+                searchAnimation.Stop();
+            }
+        };
+        page.Disposed += (_, _) => searchAnimation.Dispose();
+        void OpenSearch()
+        {
+            searchButton.Visible = false;
+            searchFrame.Width = 140;
+            searchFrame.Visible = true;
+            _searchBox.Focus();
+            searchAnimation.Start();
+        }
+
+        void CloseSearchIfEmpty()
+        {
+            if (string.IsNullOrEmpty(_searchBox.Text))
+            {
+                searchAnimation.Stop();
+                searchFrame.Visible = false;
+                searchButton.Visible = true;
+            }
+        }
+
+        searchButton.Click += (_, _) => OpenSearch();
+        searchIcon.Click += (_, _) => _searchBox.Focus();
+        clearSearch.Click += (_, _) =>
+        {
+            _searchBox.Clear();
+            _searchBox.Focus();
+        };
+        _searchBox.GotFocus += (_, _) =>
+        {
+            searchFrame.OutlineColor = Accent;
+            searchFrame.OutlineWidth = 2F;
+            searchFrame.Invalidate();
+        };
+        _searchBox.LostFocus += (_, _) =>
+        {
+            searchFrame.OutlineColor = BorderColor;
+            searchFrame.OutlineWidth = 1.5F;
+            searchFrame.Invalidate();
+            CloseSearchIfEmpty();
+        };
+        _searchBox.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode == Keys.Escape)
+            {
+                _searchBox.Clear();
+                _grid.Focus();
+                e.SuppressKeyPress = true;
+            }
+        };
+        _searchBox.TextChanged += (_, _) =>
+        {
+            clearSearch.Visible = _searchBox.TextLength > 0;
+            if (_searchBox.TextLength > 0 && !searchFrame.Visible)
+            {
+                searchButton.Visible = false;
+                searchFrame.Width = searchOpenWidth;
+                searchFrame.Visible = true;
+            }
+
+            RefreshVocabulary();
+        };
         // Select-all / clear-all live in the "Tiếng Trung" header filter menu.
 
         _grid.Dock = DockStyle.Fill;
