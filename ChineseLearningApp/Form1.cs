@@ -54,8 +54,8 @@ public sealed partial class Form1 : Form
     private readonly Label _flashcardPinyin = new();
     private readonly Label _flashcardDetails = new();
     private readonly Label _practiceMeaning = new();
-    private readonly Label _practiceEnglishMeaning = new();
-    private readonly Label _practiceFeedback = new();
+    private readonly HighlightLabel _practiceEnglishMeaning = new();
+    private readonly HighlightLabel _practiceFeedback = new();
     private readonly Label _practiceTimerLabel = new();
     private readonly Label _practiceScoreLabel = new();
     private readonly Label _practiceHint = new();
@@ -2406,14 +2406,25 @@ public sealed partial class Form1 : Form
         e.Paint(e.CellBounds, DataGridViewPaintParts.All & ~DataGridViewPaintParts.ContentForeground);
         var selected = (e.State & DataGridViewElementStates.Selected) != 0;
         var normalColor = selected ? e.CellStyle.SelectionForeColor : e.CellStyle.ForeColor;
-        const TextFormatFlags flags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine;
-        var graphics = e.Graphics!;
-        var font = e.CellStyle.Font ?? _grid.Font;
         var bounds = new Rectangle(
             e.CellBounds.Left + e.CellStyle.Padding.Left,
             e.CellBounds.Top + e.CellStyle.Padding.Top,
             Math.Max(1, e.CellBounds.Width - e.CellStyle.Padding.Horizontal),
             Math.Max(1, e.CellBounds.Height - e.CellStyle.Padding.Vertical - 1));
+        DrawHighlightedSegments(e.Graphics!, segments, e.CellStyle.Font ?? _grid.Font, bounds, normalColor, centerVertically: true);
+        e.Handled = true;
+    }
+
+    // Draws wrapped, horizontally centred text with highlighted segments in red.
+    private static void DrawHighlightedSegments(
+        Graphics graphics,
+        IReadOnlyList<(string Text, bool Highlight)> segments,
+        Font font,
+        Rectangle bounds,
+        Color normalColor,
+        bool centerVertically)
+    {
+        const TextFormatFlags flags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine;
         var spaceWidth = TextRenderer.MeasureText(graphics, "a a", font, Size.Empty, flags).Width -
                          TextRenderer.MeasureText(graphics, "aa", font, Size.Empty, flags).Width;
         var lineHeight = TextRenderer.MeasureText(graphics, "Ag汉", font, Size.Empty, flags).Height;
@@ -2446,7 +2457,9 @@ public sealed partial class Form1 : Form
 
         var clip = graphics.Clip;
         graphics.SetClip(bounds);
-        var y = bounds.Top + Math.Max(0, (bounds.Height - lines.Count * lineHeight) / 2);
+        var y = centerVertically
+            ? bounds.Top + Math.Max(0, (bounds.Height - lines.Count * lineHeight) / 2)
+            : bounds.Top;
         foreach (var line in lines)
         {
             var x = bounds.Left + Math.Max(0, (bounds.Width - line.Sum(unit => unit.Width)) / 2);
@@ -2466,7 +2479,43 @@ public sealed partial class Form1 : Form
         }
 
         graphics.Clip = clip;
-        e.Handled = true;
+    }
+
+    // A label that draws the given Chinese keys in red (plain Label when there are none).
+    private sealed class HighlightLabel : Label
+    {
+        private IReadOnlyList<string> _highlightKeys = [];
+
+        public IReadOnlyList<string> HighlightKeys
+        {
+            get => _highlightKeys;
+            set
+            {
+                _highlightKeys = value;
+                Invalidate();
+            }
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var segments = _highlightKeys.Count == 0
+                ? null
+                : SplitHighlightedWord(Text, _highlightKeys);
+            if (segments is null || !segments.Any(segment => segment.Highlight))
+            {
+                base.OnPaint(e);
+                return;
+            }
+
+            var bounds = new Rectangle(
+                Padding.Left,
+                Padding.Top,
+                Math.Max(1, ClientSize.Width - Padding.Horizontal),
+                Math.Max(1, ClientSize.Height - Padding.Vertical));
+            var centerVertically = TextAlign is ContentAlignment.MiddleCenter or
+                ContentAlignment.MiddleLeft or ContentAlignment.MiddleRight;
+            DrawHighlightedSegments(e.Graphics, segments, Font, bounds, ForeColor, centerVertically);
+        }
     }
 
     // Keys are the Chinese runs of the word, with and without bracketed parts
@@ -3028,6 +3077,12 @@ public sealed partial class Form1 : Form
         var (prompt, detail) = GetPracticePrompt(practiceWords[_questionIndex]);
         _practiceMeaning.Text = prompt;
         _practiceEnglishMeaning.Text = detail;
+        // In example mode the word is drawn in red in the hint and in the shown answer.
+        IReadOnlyList<string> highlightKeys = _practiceExampleMode
+            ? GetHighlightKeys(practiceWords[_questionIndex].Chinese)
+            : [];
+        _practiceEnglishMeaning.HighlightKeys = highlightKeys;
+        _practiceFeedback.HighlightKeys = highlightKeys;
         _practiceFeedback.Text = string.Empty;
         _practiceFeedback.ForeColor = Color.FromArgb(60, 70, 82);
         _answerChecked = false;
@@ -3200,7 +3255,8 @@ public sealed partial class Form1 : Form
             _practiceFeedback.Text = timedOut
                 ? $"Hết giờ! Đáp án: {FormatPracticeAnswer(word)}"
                 : $"Chưa đúng. Đáp án: {FormatPracticeAnswer(word)}";
-            _practiceFeedback.ForeColor = Color.Firebrick;
+            // In example mode the word inside the answer is red, so the rest stays dark.
+            _practiceFeedback.ForeColor = _practiceExampleMode ? Color.FromArgb(60, 70, 82) : Color.Firebrick;
         }
 
         _answerChecked = true;
