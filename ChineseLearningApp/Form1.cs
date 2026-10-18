@@ -63,6 +63,12 @@ public sealed partial class Form1 : Form
         "selected-words.json");
     // Off until the saved selection was read, so a failed read is never overwritten.
     private bool _saveSelectedWords;
+    // Typing-practice words answered wrong (with how often), kept until answered right.
+    private readonly string _missedWordsPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "ChineseLearningApp",
+        "missed-words.json");
+    private bool _saveMissedWords;
     private readonly Dictionary<string, bool> _columnVisibility = new(StringComparer.Ordinal);
     // Per-column text size in points; columns not listed use DefaultCellFontSize.
     private readonly Dictionary<string, float> _columnFontSizes = new(StringComparer.Ordinal);
@@ -226,6 +232,21 @@ public sealed partial class Form1 : Form
             Shown += (_, _) => MessageBox.Show(
                 this,
                 $"Không thể đọc cỡ chữ các cột: {ex.Message}",
+                "Lỗi đọc cài đặt",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+
+        try
+        {
+            LoadMissedWords();
+            _saveMissedWords = true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
+        {
+            Shown += (_, _) => MessageBox.Show(
+                this,
+                $"Không thể đọc danh sách từ đã sai: {ex.Message}",
                 "Lỗi đọc cài đặt",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
@@ -1420,6 +1441,41 @@ public sealed partial class Form1 : Form
         {
             MessageBox.Show(this, $"Không thể lưu cỡ chữ: {ex.Message}", "Lỗi lưu cài đặt",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void LoadMissedWords()
+    {
+        if (!File.Exists(_missedWordsPath))
+        {
+            return;
+        }
+
+        var json = File.ReadAllText(_missedWordsPath, Encoding.UTF8);
+        var saved = JsonSerializer.Deserialize<Dictionary<string, int>>(json)
+            ?? throw new InvalidDataException("Tệp từ đã sai không chứa danh sách hợp lệ.");
+        var known = _words.Select(word => word.Chinese).ToHashSet(StringComparer.Ordinal);
+        foreach (var (chinese, count) in saved.Where(entry => known.Contains(entry.Key) && entry.Value > 0))
+        {
+            _incorrectWordCounts[chinese] = count;
+        }
+    }
+
+    private void SaveMissedWords()
+    {
+        if (!_saveMissedWords)
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_missedWordsPath)!);
+            File.WriteAllText(_missedWordsPath, JsonSerializer.Serialize(_incorrectWordCounts, JsonOptions), new UTF8Encoding(false));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The list still works for this session; it just will not be remembered.
         }
     }
 
@@ -2661,6 +2717,8 @@ public sealed partial class Form1 : Form
             {
                 _incorrectWordCounts.Remove(wordKey);
             }
+
+            SaveMissedWords();
 
             _flashcardIndex = -1;
             _flashcardOrder.Clear();
@@ -5172,7 +5230,11 @@ public sealed partial class Form1 : Form
         if (isCorrect)
         {
             _correctAnswerCount++;
-            _practiceFeedback.Text = "Chính xác! Giỏi lắm.";
+            // A right answer clears the word from the saved missed list.
+            var wasMissed = _incorrectWordCounts.Remove(word.Chinese);
+            _practiceFeedback.Text = wasMissed
+                ? "Chính xác! Đã xóa từ này khỏi danh sách từ sai."
+                : "Chính xác! Giỏi lắm.";
             _practiceFeedback.ForeColor = SuccessColor;
         }
         else
@@ -5193,8 +5255,10 @@ public sealed partial class Form1 : Form
         UpdatePracticeScore();
     }
 
+    // Every change to the missed list goes through here, so save it as well.
     private void UpdatePracticeScore()
     {
+        SaveMissedWords();
         _practiceScoreLabel.Text = $"Đúng: {_correctAnswerCount}     Sai: {_wrongAnswerCount}";
         _practiceScoreLabel.ForeColor = Color.FromArgb(48, 68, 88);
         _reviewIncorrectWordsButton.Text = $"Xem từ đã sai ({_incorrectWordCounts.Count})";
