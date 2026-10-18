@@ -90,7 +90,16 @@ public sealed partial class Form1 : Form
     private string? _editingVocabularyCellValue;
     private bool _refreshingVocabulary;
     private IReadOnlyList<VocabularyWord> PracticeWords => _practiceReviewWords ?? _studyWords;
-    private long PracticeDurationMilliseconds => _practiceDurationSeconds * 1000L;
+    // Example sentences get one extra second per character to type.
+    private long PracticeDurationMilliseconds =>
+        _practiceDurationSeconds * 1000L +
+        (_practiceExampleMode && CurrentPracticeWord is { } word
+            ? NormalizePracticeAnswer(GetPracticeAnswer(word)).Length * 1000L
+            : 0);
+    private VocabularyWord? CurrentPracticeWord =>
+        _questionIndex >= 0 && _questionIndex < PracticeWords.Count ? PracticeWords[_questionIndex] : null;
+    private bool _practiceExampleMode;
+    private Label? _practiceTitle;
 
     public Form1(string userName)
     {
@@ -648,7 +657,69 @@ public sealed partial class Form1 : Form
     }
 
     private void UpdatePracticeHint() =>
-        _practiceHint.Text = $"Mỗi câu có {_practiceDurationSeconds} giây. Nhấn Enter để kiểm tra; sau đó câu tiếp theo sẽ hiện tự động.";
+        _practiceHint.Text = _practiceExampleMode
+            ? $"Mỗi câu có {_practiceDurationSeconds} giây, cộng thêm 1 giây cho mỗi chữ. Không cần gõ dấu câu. Nhấn Enter để kiểm tra."
+            : $"Mỗi câu có {_practiceDurationSeconds} giây. Nhấn Enter để kiểm tra; sau đó câu tiếp theo sẽ hiện tự động.";
+
+    // In example mode the learner types the word's Chinese example sentence.
+    private string GetPracticeAnswer(VocabularyWord word) =>
+        _practiceExampleMode && !string.IsNullOrWhiteSpace(word.ChineseExample)
+            ? word.ChineseExample
+            : word.Chinese;
+
+    private (string Prompt, string Detail) GetPracticePrompt(VocabularyWord word)
+    {
+        if (!_practiceExampleMode || string.IsNullOrWhiteSpace(word.ChineseExample))
+        {
+            return (word.Vietnamese, FormatEnglishMeaning(word.English));
+        }
+
+        var prompt = string.IsNullOrWhiteSpace(word.VietnameseExample) ? word.EnglishExample : word.VietnameseExample;
+        var pinyin = string.IsNullOrWhiteSpace(word.Pinyin) ? string.Empty : $" ({word.Pinyin})";
+        return (prompt, $"Từ cần dùng: {word.Chinese}{pinyin} – {word.Vietnamese}");
+    }
+
+    private string FormatPracticeAnswer(VocabularyWord word)
+    {
+        if (_practiceExampleMode && !string.IsNullOrWhiteSpace(word.ChineseExample))
+        {
+            return word.ChineseExample;
+        }
+
+        return string.IsNullOrWhiteSpace(word.Pinyin) ? word.Chinese : $"{word.Chinese} ({word.Pinyin})";
+    }
+
+    // Sentences are compared without spaces and punctuation; words must match exactly.
+    private bool IsPracticeAnswerCorrect(string typed, VocabularyWord word) =>
+        _practiceExampleMode
+            ? NormalizePracticeAnswer(typed) == NormalizePracticeAnswer(GetPracticeAnswer(word))
+            : string.Equals(typed.Trim(), word.Chinese, StringComparison.Ordinal);
+
+    private static string NormalizePracticeAnswer(string value) =>
+        string.Concat(value.Where(character =>
+            !char.IsWhiteSpace(character) && !char.IsPunctuation(character) && !char.IsSymbol(character)));
+
+    private void SetPracticeExampleMode(bool exampleMode)
+    {
+        if (_practiceExampleMode == exampleMode)
+        {
+            return;
+        }
+
+        _practiceExampleMode = exampleMode;
+        if (_practiceTitle is not null)
+        {
+            _practiceTitle.Text = exampleMode
+                ? "Nhìn câu tiếng Việt, gõ lại câu ví dụ tiếng Trung"
+                : "Nhìn nghĩa tiếng Việt và tiếng Anh, gõ từ tiếng Trung";
+        }
+
+        _practiceMeaning.Font = new Font("Segoe UI", exampleMode ? 18F : 24F, FontStyle.Bold);
+        _answerBox.Anchor = exampleMode ? AnchorStyles.Left | AnchorStyles.Right : AnchorStyles.None;
+        _answerBox.Width = 430;
+        UpdatePracticeHint();
+        StartPracticeWithWords(PracticeWords.ToList());
+    }
 
     private void ApplyColumnOrderFromList(ListBox list)
     {
@@ -929,6 +1000,7 @@ public sealed partial class Form1 : Form
 
         var title = CreateTitle("Nhìn nghĩa tiếng Việt và tiếng Anh, gõ từ tiếng Trung");
         title.Dock = DockStyle.Fill;
+        _practiceTitle = title;
         _practiceMeaning.Dock = DockStyle.Fill;
         _practiceMeaning.Font = new Font("Segoe UI", 24F, FontStyle.Bold);
         _practiceMeaning.ForeColor = Accent;
@@ -979,7 +1051,17 @@ public sealed partial class Form1 : Form
             FlowDirection = FlowDirection.LeftToRight,
             WrapContents = false
         };
-        practiceActions.Controls.AddRange([continueStudyButton, _pausePracticeButton, _skipPracticeButton]);
+        var practiceModeBox = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Font = new Font("Segoe UI", 10F),
+            Margin = new Padding(12, 6, 3, 3),
+            Width = 170
+        };
+        practiceModeBox.Items.AddRange(["Gõ từ vựng", "Gõ câu ví dụ"]);
+        practiceModeBox.SelectedIndex = 0;
+        practiceModeBox.SelectedIndexChanged += (_, _) => SetPracticeExampleMode(practiceModeBox.SelectedIndex == 1);
+        practiceActions.Controls.AddRange([continueStudyButton, _pausePracticeButton, _skipPracticeButton, practiceModeBox]);
         _practiceTimerLabel.Dock = DockStyle.Fill;
         _practiceTimerLabel.Font = new Font("Segoe UI", 12F, FontStyle.Bold);
         _practiceTimerLabel.ForeColor = Accent;
@@ -994,7 +1076,7 @@ public sealed partial class Form1 : Form
         _practiceFeedback.Dock = DockStyle.Fill;
         _practiceFeedback.Font = new Font("Segoe UI", 14F, FontStyle.Bold);
         _practiceFeedback.TextAlign = ContentAlignment.TopCenter;
-        _practiceHint.Text = $"Mỗi câu có {_practiceDurationSeconds} giây. Nhấn Enter để kiểm tra; sau đó câu tiếp theo sẽ hiện tự động.";
+        UpdatePracticeHint();
         _practiceHint.Dock = DockStyle.Fill;
         _practiceHint.ForeColor = Color.FromArgb(90, 100, 112);
         _practiceHint.TextAlign = ContentAlignment.TopCenter;
@@ -2943,8 +3025,9 @@ public sealed partial class Form1 : Form
 
         _questionIndex = _questionOrder[_questionOrderPosition++];
 
-        _practiceMeaning.Text = practiceWords[_questionIndex].Vietnamese;
-        _practiceEnglishMeaning.Text = FormatEnglishMeaning(practiceWords[_questionIndex].English);
+        var (prompt, detail) = GetPracticePrompt(practiceWords[_questionIndex]);
+        _practiceMeaning.Text = prompt;
+        _practiceEnglishMeaning.Text = detail;
         _practiceFeedback.Text = string.Empty;
         _practiceFeedback.ForeColor = Color.FromArgb(60, 70, 82);
         _answerChecked = false;
@@ -3025,7 +3108,7 @@ public sealed partial class Form1 : Form
         if (_questionIndex >= 0 &&
             _questionIndex < practiceWords.Count &&
             !_answerChecked &&
-            string.Equals(_answerBox.Text.Trim(), practiceWords[_questionIndex].Chinese, StringComparison.Ordinal))
+            IsPracticeAnswerCorrect(_answerBox.Text, practiceWords[_questionIndex]))
         {
             CompleteAnswer(timedOut: false);
         }
@@ -3048,15 +3131,14 @@ public sealed partial class Form1 : Form
 
         var word = practiceWords[_questionIndex];
         _incorrectWordCounts[word.Chinese] = _incorrectWordCounts.GetValueOrDefault(word.Chinese) + 1;
-        var pinyin = string.IsNullOrWhiteSpace(word.Pinyin) ? string.Empty : $" ({word.Pinyin})";
-        _practiceFeedback.Text = $"Đã bỏ qua. Đáp án: {word.Chinese}{pinyin}";
+        _practiceFeedback.Text = $"Đã bỏ qua. Đáp án: {FormatPracticeAnswer(word)}";
         _practiceFeedback.ForeColor = Color.DarkOrange;
         _answerChecked = true;
         _answerBox.Enabled = false;
         _questionStopwatch.Stop();
         _advanceAt = Environment.TickCount64 + 1800;
         UpdatePracticeScore();
-        SpeakTypedChinese(word.Chinese);
+        SpeakTypedChinese(GetPracticeAnswer(word));
     }
 
     // Reads Chinese aloud while practising; a missing voice is reported only once.
@@ -3104,8 +3186,7 @@ public sealed partial class Form1 : Form
         }
 
         var word = practiceWords[_questionIndex];
-        var isCorrect = !timedOut &&
-                        string.Equals(_answerBox.Text.Trim(), word.Chinese, StringComparison.Ordinal);
+        var isCorrect = !timedOut && IsPracticeAnswerCorrect(_answerBox.Text, word);
         if (isCorrect)
         {
             _correctAnswerCount++;
@@ -3116,10 +3197,9 @@ public sealed partial class Form1 : Form
         {
             _wrongAnswerCount++;
             _incorrectWordCounts[word.Chinese] = _incorrectWordCounts.GetValueOrDefault(word.Chinese) + 1;
-            var pinyin = string.IsNullOrWhiteSpace(word.Pinyin) ? string.Empty : $" ({word.Pinyin})";
             _practiceFeedback.Text = timedOut
-                ? $"Hết giờ! Đáp án: {word.Chinese}{pinyin}"
-                : $"Chưa đúng. Đáp án: {word.Chinese}{pinyin}";
+                ? $"Hết giờ! Đáp án: {FormatPracticeAnswer(word)}"
+                : $"Chưa đúng. Đáp án: {FormatPracticeAnswer(word)}";
             _practiceFeedback.ForeColor = Color.Firebrick;
         }
 
