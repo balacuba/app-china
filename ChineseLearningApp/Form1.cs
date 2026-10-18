@@ -622,15 +622,7 @@ public sealed partial class Form1 : Form
         _searchBox.Margin = new Padding(0, 4, 16, 0);
         _searchBox.TextChanged += (_, _) => RefreshVocabulary();
         searchRow.Controls.Add(_searchBox);
-        var selectAllButton = CreateButton("Tích chọn tất cả", SelectAllWords, secondary: true);
-        var clearSelectionButton = CreateButton("Bỏ tích chọn tất cả", ClearWordSelection, secondary: true);
-        foreach (var button in new[] { selectAllButton, clearSelectionButton })
-        {
-            button.Padding = new Padding(12, 5, 12, 5);
-        }
-
-        searchRow.Controls.Add(selectAllButton);
-        searchRow.Controls.Add(clearSelectionButton);
+        // Select-all / clear-all live in the "Tiếng Trung" header filter menu.
 
         _grid.Dock = DockStyle.Fill;
         _grid.AllowUserToAddRows = false;
@@ -734,7 +726,7 @@ public sealed partial class Form1 : Form
         var hint = new Label
         {
             Dock = DockStyle.Fill,
-            Text = "Tích chọn những từ muốn học. Flashcard và luyện gõ chỉ dùng các từ đã tích. Nút tích/bỏ tích tất cả chỉ áp dụng cho các từ đang hiển thị sau khi tìm kiếm và lọc.",
+            Text = "Tích chọn những từ muốn học. Flashcard và luyện gõ chỉ dùng các từ đã tích. Bấm tiêu đề “Tiếng Trung” để tích / bỏ tích tất cả các từ đang hiển thị sau khi tìm kiếm và lọc.",
             ForeColor = MutedTextColor,
             TextAlign = ContentAlignment.MiddleLeft
         };
@@ -2878,8 +2870,268 @@ public sealed partial class Form1 : Form
         ShowColumnFilter(column);
     }
 
+    // "Tiếng Trung" lists the words left by the search and the HSK ticks, each
+    // with its study tick, plus tick-all / untick-all for those words. It is a
+    // rounded card: rounded search box, rounded list with rounded tick boxes.
+    private void ShowStudyWordMenu(DataGridViewColumn column)
+    {
+        const int menuWidth = 340;
+        const int menuHeight = 480;
+        var dropDown = new ToolStripDropDown { AutoClose = true, Padding = Padding.Empty, DropShadowEnabled = true };
+        var card = new RoundedPanel
+        {
+            Size = new Size(menuWidth, menuHeight),
+            Radius = 16,
+            FillColor = SurfaceColor,
+            OutlineColor = Color.FromArgb(203, 213, 225),
+            BackColor = SurfaceColor
+        };
+
+        // Rounded search box with a magnifier.
+        var searchFrame = new RoundedPanel
+        {
+            Location = new Point(14, 14),
+            Size = new Size(menuWidth - 28, 38),
+            Radius = 19,
+            FillColor = PageColor,
+            OutlineColor = BorderColor,
+            BackColor = SurfaceColor,
+        };
+        var searchIcon = new Label
+        {
+            AutoSize = false,
+            Location = new Point(12, 8),
+            Size = new Size(24, 22),
+            Text = "🔍",
+            Font = new Font("Segoe UI Emoji", 10F),
+            ForeColor = MutedTextColor,
+            BackColor = PageColor,
+            TextAlign = ContentAlignment.MiddleCenter
+        };
+        var search = new TextBox
+        {
+            Location = new Point(40, 10),
+            Width = searchFrame.Width - 56,
+            BorderStyle = BorderStyle.None,
+            BackColor = PageColor,
+            Font = new Font(UiFontName, 10.5F),
+            PlaceholderText = "Tìm chữ Hán hoặc pinyin..."
+        };
+        searchFrame.Controls.Add(searchIcon);
+        searchFrame.Controls.Add(search);
+
+        var summary = new PillLabel
+        {
+            AutoSize = false,
+            Location = new Point(14, 62),
+            Size = new Size(menuWidth - 28, 30),
+            Font = new Font(UiFontName, 9.5F, FontStyle.Bold),
+            ForeColor = Accent,
+            TextAlign = ContentAlignment.MiddleCenter
+        };
+
+        // Owner-drawn list in a rounded frame: a click anywhere on a row toggles it.
+        var listFrame = new RoundedPanel
+        {
+            Location = new Point(14, 102),
+            Size = new Size(menuWidth - 28, 280),
+            Radius = 14,
+            FillColor = SurfaceColor,
+            OutlineColor = BorderColor,
+            BackColor = SurfaceColor,
+            Padding = new Padding(6)
+        };
+        var wordList = new ListBox
+        {
+            Dock = DockStyle.Fill,
+            BorderStyle = BorderStyle.None,
+            DrawMode = DrawMode.OwnerDrawFixed,
+            IntegralHeight = false,
+            ItemHeight = 34,
+            BackColor = SurfaceColor,
+            SelectionMode = SelectionMode.None
+        };
+        listFrame.Controls.Add(wordList);
+        var hoverIndex = -1;
+        var hanziFont = new Font("Microsoft YaHei UI", 11.5F);
+        var pinyinFont = new Font(UiFontName, 9.5F);
+        wordList.Disposed += (_, _) => { pinyinFont.Dispose(); hanziFont.Dispose(); };
+        wordList.DrawItem += (_, e) =>
+        {
+            if (e.Index < 0 || wordList.Items[e.Index] is not StudyWordOption option)
+            {
+                return;
+            }
+
+            var graphics = e.Graphics;
+            using (var background = new SolidBrush(SurfaceColor))
+            {
+                graphics.FillRectangle(background, e.Bounds);
+            }
+
+            var word = option.Word;
+            if (e.Index == hoverIndex || word.IsSelected)
+            {
+                var smoothing = graphics.SmoothingMode;
+                graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                var pill = new RectangleF(e.Bounds.Left + 1, e.Bounds.Top + 2, e.Bounds.Width - 3, e.Bounds.Height - 4);
+                using var path = RoundedMenuRenderer.CreateRoundedPath(pill, 9);
+                using var fill = new SolidBrush(word.IsSelected ? AccentSoft : Color.FromArgb(241, 245, 249));
+                graphics.FillPath(fill, path);
+                graphics.SmoothingMode = smoothing;
+            }
+
+            DrawRoundedTickBox(graphics, new RectangleF(e.Bounds.Left + 10, e.Bounds.Top + (e.Bounds.Height - 20) / 2F, 20, 20), word.IsSelected);
+            var textLeft = e.Bounds.Left + 42;
+            var hanziWidth = TextRenderer.MeasureText(graphics, word.Chinese, hanziFont, Size.Empty, TextFormatFlags.NoPadding).Width;
+            TextRenderer.DrawText(graphics, word.Chinese, hanziFont,
+                new Rectangle(textLeft, e.Bounds.Top, hanziWidth + 4, e.Bounds.Height),
+                word.IsSelected ? Accent : TextColor, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            TextRenderer.DrawText(graphics, word.Pinyin, pinyinFont,
+                new Rectangle(textLeft + hanziWidth + 12, e.Bounds.Top, e.Bounds.Right - textLeft - hanziWidth - 16, e.Bounds.Height),
+                MutedTextColor, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+        };
+
+        void UpdateSummary()
+        {
+            var words = wordList.Items.OfType<StudyWordOption>().Select(option => option.Word).ToList();
+            var hskLevels = _hskFilterChecks.Where(item => item.Box.Checked).Select(item => item.Level ?? "Khác").ToList();
+            var source = hskLevels.Count == 0 ? "Tất cả HSK" : string.Join(", ", hskLevels);
+            summary.Text = $"{source}  •  {words.Count} từ  •  ✅ {words.Count(word => word.IsSelected)} đang học";
+        }
+
+        void FillList()
+        {
+            var query = search.Text.Trim();
+            var words = _visibleWords.Where(word => string.IsNullOrEmpty(query) ||
+                word.Chinese.Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
+                word.Pinyin.Contains(query, StringComparison.CurrentCultureIgnoreCase)).ToList();
+            wordList.BeginUpdate();
+            try
+            {
+                wordList.Items.Clear();
+                foreach (var word in words)
+                {
+                    wordList.Items.Add(new StudyWordOption(word));
+                }
+            }
+            finally
+            {
+                wordList.EndUpdate();
+            }
+
+            UpdateSummary();
+        }
+
+        // Toggling a row works like ticking "Học" in the grid.
+        void Toggle(int index)
+        {
+            if (index < 0 || index >= wordList.Items.Count || wordList.Items[index] is not StudyWordOption option)
+            {
+                return;
+            }
+
+            option.Word.IsSelected = !option.Word.IsSelected;
+            wordList.Invalidate(wordList.GetItemRectangle(index));
+            _grid.InvalidateColumn(_grid.Columns[nameof(VocabularyWord.IsSelected)]!.Index);
+            RefreshStudyWords();
+            UpdateSummary();
+        }
+
+        search.TextChanged += (_, _) => FillList();
+        wordList.MouseDown += (_, e) => Toggle(wordList.IndexFromPoint(e.Location));
+        wordList.MouseMove += (_, e) =>
+        {
+            var index = wordList.IndexFromPoint(e.Location);
+            if (index != hoverIndex)
+            {
+                var previous = hoverIndex;
+                hoverIndex = index;
+                if (previous >= 0 && previous < wordList.Items.Count)
+                {
+                    wordList.Invalidate(wordList.GetItemRectangle(previous));
+                }
+
+                if (index >= 0)
+                {
+                    wordList.Invalidate(wordList.GetItemRectangle(index));
+                }
+            }
+        };
+        wordList.MouseLeave += (_, _) =>
+        {
+            if (hoverIndex >= 0 && hoverIndex < wordList.Items.Count)
+            {
+                var previous = hoverIndex;
+                hoverIndex = -1;
+                wordList.Invalidate(wordList.GetItemRectangle(previous));
+            }
+        };
+
+        var buttonsTitle = new Label
+        {
+            AutoSize = false,
+            Location = new Point(16, 392),
+            Size = new Size(menuWidth - 32, 20),
+            ForeColor = MutedTextColor,
+            BackColor = SurfaceColor,
+            Text = "Chọn học các từ đang hiển thị:"
+        };
+        var studyButtons = new[]
+        {
+            CreateButton("✔  Tích chọn tất cả", (s, e) => { SelectAllWords(s, e); wordList.Invalidate(); UpdateSummary(); }),
+            CreateButton("✖  Bỏ tích tất cả", (s, e) => { ClearWordSelection(s, e); wordList.Invalidate(); UpdateSummary(); }, secondary: true)
+        };
+        var buttonWidth = (menuWidth - 28 - 10) / 2;
+        for (var index = 0; index < studyButtons.Length; index++)
+        {
+            studyButtons[index].AutoSize = false;
+            studyButtons[index].Size = new Size(buttonWidth, 40);
+            studyButtons[index].Margin = Padding.Empty;
+            studyButtons[index].Location = new Point(14 + index * (buttonWidth + 10), 418);
+        }
+
+        card.Controls.AddRange([searchFrame, summary, listFrame, buttonsTitle, .. studyButtons]);
+        dropDown.Items.Add(new ToolStripControlHost(card)
+        {
+            AutoSize = false,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
+            Size = card.Size
+        });
+        // Clip the popup itself to the card's rounded shape.
+        dropDown.Opened += (_, _) =>
+        {
+            using var path = RoundedMenuRenderer.CreateRoundedPath(new RectangleF(0, 0, dropDown.Width, dropDown.Height), 16);
+            dropDown.Region = new Region(path);
+        };
+        dropDown.Closed += (_, _) =>
+        {
+            if (!IsDisposed && IsHandleCreated)
+            {
+                BeginInvoke((Action)dropDown.Dispose);
+            }
+        };
+        FillList();
+
+        var headerBounds = _grid.GetCellDisplayRectangle(column.Index, -1, true);
+        dropDown.Show(_grid.PointToScreen(new Point(headerBounds.Left, headerBounds.Bottom + 4)));
+    }
+
+    private sealed record StudyWordOption(VocabularyWord Word)
+    {
+        public override string ToString() =>
+            string.IsNullOrWhiteSpace(Word.Pinyin) ? Word.Chinese : $"{Word.Chinese}   {Word.Pinyin}";
+    }
+
     private void ShowColumnFilter(DataGridViewColumn column)
     {
+        if (column.DataPropertyName == nameof(VocabularyWord.Chinese))
+        {
+            ShowStudyWordMenu(column);
+            return;
+        }
+
         var propertyName = column.DataPropertyName;
         var values = _words
             .Select(word => GetFilterValue(word, propertyName))
@@ -3031,6 +3283,7 @@ public sealed partial class Form1 : Form
         };
 
         panel.Controls.AddRange([search, selectAll, optionsList, clear, apply]);
+
         dropDown.Items.Add(new ToolStripControlHost(panel)
         {
             AutoSize = false,
