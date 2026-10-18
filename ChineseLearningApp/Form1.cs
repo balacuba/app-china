@@ -12,8 +12,32 @@ namespace ChineseLearningApp;
 
 public sealed partial class Form1 : Form
 {
-    private static readonly Color Accent = Color.FromArgb(33, 103, 153);
-    private static readonly Color PageColor = Color.FromArgb(245, 247, 250);
+    // Theme: one place for the app's colours and fonts.
+    private static readonly Color Accent = Color.FromArgb(37, 99, 235);
+    private static readonly Color AccentHover = Color.FromArgb(29, 78, 216);
+    private static readonly Color AccentPressed = Color.FromArgb(30, 64, 175);
+    private static readonly Color AccentSoft = Color.FromArgb(232, 240, 254);
+    private static readonly Color AccentSoftHover = Color.FromArgb(214, 228, 253);
+    private static readonly Color DangerSoft = Color.FromArgb(254, 236, 236);
+    private static readonly Color DangerSoftHover = Color.FromArgb(252, 218, 218);
+    private static readonly Color DangerText = Color.FromArgb(185, 28, 28);
+    private static readonly Color PageColor = Color.FromArgb(243, 245, 249);
+    private static readonly Color SurfaceColor = Color.White;
+    private static readonly Color BorderColor = Color.FromArgb(226, 232, 240);
+    private static readonly Color HeaderRowColor = Color.FromArgb(241, 245, 249);
+    private static readonly Color StripeRowColor = Color.FromArgb(249, 250, 252);
+    private static readonly Color TextColor = Color.FromArgb(30, 41, 59);
+    private static readonly Color BodyTextColor = Color.FromArgb(51, 65, 85);
+    private static readonly Color MutedTextColor = Color.FromArgb(100, 116, 139);
+    private static readonly Color SuccessColor = Color.FromArgb(22, 128, 61);
+    private const string UiFontName = "Segoe UI";
+
+    private enum ButtonKind
+    {
+        Primary,
+        Secondary,
+        Danger
+    }
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
     private readonly string _dataPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -99,11 +123,13 @@ public sealed partial class Form1 : Form
     private VocabularyWord? CurrentPracticeWord =>
         _questionIndex >= 0 && _questionIndex < PracticeWords.Count ? PracticeWords[_questionIndex] : null;
     private bool _practiceExampleMode;
+    private readonly string _userName;
     private Label? _practiceTitle;
 
     public Form1(string userName)
     {
         InitializeComponent();
+        _userName = userName;
         Text = $"Cùng học tiếng trung nhé '{userName}'";
         // Open at ~85% of the current screen's working area so the window suits
         // both small laptops and large monitors.
@@ -213,10 +239,14 @@ public sealed partial class Form1 : Form
                 .Select(word => Convert.ToString(property.GetValue(word), CultureInfo.CurrentCulture) ?? string.Empty)
                 .OrderBy(value => value.Length)
                 .ToList();
-            var typical = values[(int)((values.Count - 1) * 0.95)];
+            // Short columns cannot wrap, so size them for their longest value.
+            var typical = values[(int)((values.Count - 1) * (IsWrappingColumn(column.DataPropertyName) ? 0.95 : 1.0))];
             var contentWidth = TextRenderer.MeasureText(typical, cellFont).Width + cellPadding;
             var headerWidth = TextRenderer.MeasureText(column.HeaderText, headerFont).Width + 20;
-            _baseColumnWidths[column.Name] = Math.Clamp(Math.Max(contentWidth, headerWidth), 60, maxWidth);
+            _baseColumnWidths[column.Name] = Math.Clamp(
+                Math.Max(contentWidth, headerWidth),
+                60,
+                IsWrappingColumn(column.DataPropertyName) ? maxWidth : 240);
         }
 
         FitColumnsToGrid();
@@ -226,6 +256,16 @@ public sealed partial class Form1 : Form
     // the grid (no sideways scrolling); each keeps at least MinimumFitColumnWidth.
     private const int MinimumFitColumnWidth = 60;
 
+    private static bool IsWrappingColumn(string propertyName) =>
+        propertyName is
+            nameof(VocabularyWord.Vietnamese) or
+            nameof(VocabularyWord.English) or
+            nameof(VocabularyWord.EnglishExample) or
+            nameof(VocabularyWord.ChineseExample) or
+            nameof(VocabularyWord.VietnameseExample) or
+            nameof(VocabularyWord.EnglishGrammar) or
+            nameof(VocabularyWord.VietnameseGrammar);
+
     private void FitColumnsToGrid()
     {
         if (_baseColumnWidths.Count == 0 || _grid.ClientSize.Width <= 0)
@@ -233,16 +273,31 @@ public sealed partial class Form1 : Form
             return;
         }
 
+        // Short columns (word, pinyin, level…) keep their natural width because their
+        // text cannot wrap; only the long-text columns shrink or stretch.
+        _fittingColumns = true;
+        try
+        {
+            foreach (var column in _grid.Columns.Cast<DataGridViewColumn>()
+                         .Where(column => _baseColumnWidths.ContainsKey(column.Name) && !IsWrappingColumn(column.Name)))
+            {
+                column.Width = _baseColumnWidths[column.Name];
+            }
+        }
+        finally
+        {
+            _fittingColumns = false;
+        }
+
         var columns = _grid.Columns.Cast<DataGridViewColumn>()
-            .Where(column => column.Visible && _baseColumnWidths.ContainsKey(column.Name))
+            .Where(column => column.Visible && _baseColumnWidths.ContainsKey(column.Name) && IsWrappingColumn(column.Name))
             .ToList();
         var fixedWidth = _grid.Columns.Cast<DataGridViewColumn>()
-            .Where(column => column.Visible && !_baseColumnWidths.ContainsKey(column.Name))
+            .Where(column => column.Visible && !columns.Contains(column))
             .Sum(column => column.Width);
-        var scrollBarWidth = _grid.Controls.OfType<VScrollBar>().Any(bar => bar.Visible)
-            ? SystemInformation.VerticalScrollBarWidth
-            : 0;
-        var available = _grid.ClientSize.Width - fixedWidth - scrollBarWidth - 2;
+        // The vertical scrollbar is reserved up front: with thousands of rows it is
+        // nearly always shown, and it appears only after the widths are applied.
+        var available = _grid.ClientSize.Width - fixedWidth - SystemInformation.VerticalScrollBarWidth - 2;
         var baseTotal = columns.Sum(column => _baseColumnWidths[column.Name]);
         if (columns.Count == 0 || baseTotal <= 0)
         {
@@ -308,9 +363,12 @@ public sealed partial class Form1 : Form
         var tabs = new TabControl
         {
             Dock = DockStyle.Fill,
-            Font = new Font("Segoe UI", 10F),
-            Padding = new Point(16, 7)
+            Font = new Font(UiFontName, 10.5F),
+            DrawMode = TabDrawMode.OwnerDrawFixed,
+            SizeMode = TabSizeMode.Fixed,
+            ItemSize = new Size(150, 42)
         };
+        tabs.DrawItem += Tabs_DrawItem;
         tabs.TabPages.Add(BuildVocabularyPage());
         tabs.TabPages.Add(BuildFlashcardPage());
         tabs.TabPages.Add(practicePage);
@@ -319,6 +377,68 @@ public sealed partial class Form1 : Form
         _tabs = tabs;
         _practicePage = practicePage;
         Controls.Add(tabs);
+        Controls.Add(BuildHeaderBar());
+        tabs.BringToFront();
+    }
+
+    // Accent-coloured app bar with the app name and a greeting.
+    private Panel BuildHeaderBar()
+    {
+        var header = new Panel { Dock = DockStyle.Top, Height = 56, BackColor = Accent, Padding = new Padding(20, 0, 20, 0) };
+        var appName = new Label
+        {
+            Dock = DockStyle.Left,
+            AutoSize = false,
+            Width = 420,
+            Text = "汉语  Học tiếng Trung",
+            Font = new Font("Segoe UI Semibold", 15F),
+            ForeColor = Color.White,
+            TextAlign = ContentAlignment.MiddleLeft
+        };
+        var greeting = new Label
+        {
+            Dock = DockStyle.Right,
+            AutoSize = false,
+            Width = 360,
+            Text = $"Xin chào, {_userName}",
+            Font = new Font(UiFontName, 11F),
+            ForeColor = Color.FromArgb(219, 234, 254),
+            TextAlign = ContentAlignment.MiddleRight
+        };
+        header.Controls.Add(appName);
+        header.Controls.Add(greeting);
+        return header;
+    }
+
+    // Flat tabs: the selected one is white with accent text and an accent underline.
+    private static void Tabs_DrawItem(object? sender, DrawItemEventArgs e)
+    {
+        if (sender is not TabControl tabs)
+        {
+            return;
+        }
+
+        var selected = e.Index == tabs.SelectedIndex;
+        var bounds = e.Bounds;
+        using (var background = new SolidBrush(selected ? SurfaceColor : PageColor))
+        {
+            e.Graphics.FillRectangle(background, bounds);
+        }
+
+        if (selected)
+        {
+            using var underline = new SolidBrush(Accent);
+            e.Graphics.FillRectangle(underline, bounds.Left, bounds.Bottom - 3, bounds.Width, 3);
+        }
+
+        using var font = new Font(selected ? "Segoe UI Semibold" : UiFontName, 10.5F);
+        TextRenderer.DrawText(
+            e.Graphics,
+            tabs.TabPages[e.Index].Text,
+            font,
+            bounds,
+            selected ? Accent : MutedTextColor,
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
     }
 
     private TabPage BuildVocabularyPage()
@@ -344,10 +464,10 @@ public sealed partial class Form1 : Form
         };
         toolbar.Controls.Add(CreateButton("Nhập CSV / TXT", ImportVocabulary));
         toolbar.Controls.Add(CreateButton("Thêm từ", AddWord));
-        toolbar.Controls.Add(CreateButton("Xóa từ", DeleteWord, secondary: true));
-        toolbar.Controls.Add(CreateButton("Xóa toàn bộ", DeleteAllWords, secondary: true));
+        toolbar.Controls.Add(CreateButton("Xóa từ", DeleteWord, danger: true));
+        toolbar.Controls.Add(CreateButton("Xóa toàn bộ", DeleteAllWords, danger: true));
         _countLabel.AutoSize = true;
-        _countLabel.ForeColor = Color.FromArgb(90, 100, 112);
+        _countLabel.ForeColor = MutedTextColor;
         _countLabel.Margin = new Padding(14, 11, 0, 0);
         toolbar.Controls.Add(_countLabel);
 
@@ -360,25 +480,22 @@ public sealed partial class Form1 : Form
         searchRow.Controls.Add(new Label
         {
             AutoSize = true,
-            Text = "Tìm từ:",
-            Margin = new Padding(0, 7, 8, 0)
+            Text = "🔍 Tìm từ:",
+            ForeColor = BodyTextColor,
+            Margin = new Padding(0, 9, 8, 0)
         });
-        _searchBox.Width = 190;
+        _searchBox.Width = 320;
+        _searchBox.Font = new Font(UiFontName, 11F);
+        _searchBox.BorderStyle = BorderStyle.FixedSingle;
         _searchBox.PlaceholderText = "Tiếng Trung, pinyin, nghĩa, ví dụ...";
-        _searchBox.Margin = new Padding(0, 2, 12, 0);
+        _searchBox.Margin = new Padding(0, 4, 16, 0);
         _searchBox.TextChanged += (_, _) => RefreshVocabulary();
         searchRow.Controls.Add(_searchBox);
         var selectAllButton = CreateButton("Tích chọn tất cả", SelectAllWords, secondary: true);
         var clearSelectionButton = CreateButton("Bỏ tích chọn tất cả", ClearWordSelection, secondary: true);
         foreach (var button in new[] { selectAllButton, clearSelectionButton })
         {
-            button.TextAlign = ContentAlignment.MiddleCenter;
-            button.FlatAppearance.BorderSize = 2;
-            button.FlatAppearance.BorderColor = Color.FromArgb(31, 78, 121);
-            button.FlatAppearance.MouseOverBackColor = Color.FromArgb(213, 229, 243);
-            button.FlatAppearance.MouseDownBackColor = Color.FromArgb(181, 210, 235);
-            button.Margin = new Padding(0, 0, 10, 0);
-            button.Padding = new Padding(12, 4, 12, 4);
+            button.Padding = new Padding(12, 5, 12, 5);
         }
 
         searchRow.Controls.Add(selectAllButton);
@@ -391,8 +508,11 @@ public sealed partial class Form1 : Form
         _grid.AutoGenerateColumns = false;
         _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
         _grid.ShowCellToolTips = true;
-        _grid.BackgroundColor = Color.White;
-        _grid.BorderStyle = BorderStyle.FixedSingle;
+        _grid.BackgroundColor = SurfaceColor;
+        _grid.BorderStyle = BorderStyle.None;
+        _grid.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
+        _grid.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None;
+        _grid.GridColor = BorderColor;
         _grid.ColumnHeadersHeight = 42;
         _grid.EnableHeadersVisualStyles = false;
         _grid.ReadOnly = false;
@@ -453,16 +573,21 @@ public sealed partial class Form1 : Form
                 column.HeaderText = $"{column.HeaderText}  ▼";
             }
         }
-        _grid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(232, 239, 246);
-        _grid.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
+        _grid.ColumnHeadersDefaultCellStyle.BackColor = HeaderRowColor;
+        _grid.ColumnHeadersDefaultCellStyle.ForeColor = BodyTextColor;
+        _grid.ColumnHeadersDefaultCellStyle.SelectionBackColor = HeaderRowColor;
+        _grid.ColumnHeadersDefaultCellStyle.SelectionForeColor = BodyTextColor;
+        _grid.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI Semibold", 10F);
+        _grid.ColumnHeadersDefaultCellStyle.Padding = new Padding(4, 6, 4, 6);
         _grid.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
-        _grid.DefaultCellStyle.Font = new Font("Segoe UI", 11F);
+        _grid.DefaultCellStyle.Font = new Font(UiFontName, 11F);
         _grid.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
-        _grid.DefaultCellStyle.BackColor = Color.White;
-        _grid.DefaultCellStyle.ForeColor = Color.FromArgb(26, 45, 62);
+        _grid.DefaultCellStyle.BackColor = SurfaceColor;
+        _grid.DefaultCellStyle.ForeColor = TextColor;
         _grid.DefaultCellStyle.Padding = new Padding(8, 4, 8, 4);
-        _grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(208, 230, 247);
-        _grid.DefaultCellStyle.SelectionForeColor = Color.FromArgb(26, 45, 62);
+        _grid.DefaultCellStyle.SelectionBackColor = AccentSoft;
+        _grid.DefaultCellStyle.SelectionForeColor = TextColor;
+        _grid.AlternatingRowsDefaultCellStyle.BackColor = StripeRowColor;
         _grid.RowTemplate.Height = 38;
         _grid.RowTemplate.MinimumHeight = 38;
         // Columns are squeezed to fit the view, so long text wraps and rows grow.
@@ -476,13 +601,13 @@ public sealed partial class Form1 : Form
         {
             Dock = DockStyle.Fill,
             Text = "Tích chọn những từ muốn học. Flashcard và luyện gõ chỉ dùng các từ đã tích. Nút tích/bỏ tích tất cả chỉ áp dụng cho các từ đang hiển thị sau khi tìm kiếm và lọc.",
-            ForeColor = Color.FromArgb(90, 100, 112),
+            ForeColor = MutedTextColor,
             TextAlign = ContentAlignment.MiddleLeft
         };
 
         layout.Controls.Add(toolbar, 0, 0);
         layout.Controls.Add(searchRow, 0, 1);
-        layout.Controls.Add(_grid, 0, 2);
+        layout.Controls.Add(CreateCard(_grid, Padding.Empty), 0, 2);
         layout.Controls.Add(hint, 0, 3);
         page.Controls.Add(layout);
         return page;
@@ -507,7 +632,7 @@ public sealed partial class Form1 : Form
             AutoSize = true,
             Dock = DockStyle.Fill,
             Font = new Font("Segoe UI", 12F),
-            ForeColor = Color.FromArgb(90, 100, 112),
+            ForeColor = MutedTextColor,
             Text = "Tích chọn cột muốn hiển thị trong danh sách từ vựng. Thay đổi được lưu tự động.",
             TextAlign = ContentAlignment.MiddleLeft
         }, 0, 0);
@@ -527,7 +652,8 @@ public sealed partial class Form1 : Form
                 AutoSize = true,
                 Checked = column.Visible,
                 Font = new Font("Segoe UI", 11F),
-                Text = column.HeaderText,
+                ForeColor = BodyTextColor,
+                Text = Convert.ToString(column.Tag, CultureInfo.CurrentCulture) ?? column.HeaderText,
                 Tag = column.Name,
                 Margin = new Padding(0, 8, 0, 8)
             };
@@ -574,10 +700,21 @@ public sealed partial class Form1 : Form
         };
         var orderList = new ListBox
         {
-            DisplayMember = nameof(DataGridViewColumn.HeaderText),
+            BorderStyle = BorderStyle.FixedSingle,
+            Font = new Font(UiFontName, 10.5F),
+            FormattingEnabled = true,
             IntegralHeight = false,
+            ItemHeight = 24,
             Location = new Point(0, 32),
-            Size = new Size(320, 190)
+            Size = new Size(320, 260)
+        };
+        // Show the plain column title (Tag), without the filter marks in the header.
+        orderList.Format += (_, e) =>
+        {
+            if (e.ListItem is DataGridViewColumn column)
+            {
+                e.Value = Convert.ToString(column.Tag, CultureInfo.CurrentCulture) ?? column.HeaderText;
+            }
         };
         RefreshColumnOrderList(orderList);
         var orderButtons = new FlowLayoutPanel
@@ -592,7 +729,8 @@ public sealed partial class Form1 : Form
         orderPanel.Controls.Add(orderList);
         orderPanel.Controls.Add(orderButtons);
         layout.Controls.Add(orderPanel, 0, 2);
-        page.Controls.Add(layout);
+        page.Padding = new Padding(20);
+        page.Controls.Add(CreateCard(layout, new Padding(8)));
         return page;
     }
 
@@ -914,13 +1052,22 @@ public sealed partial class Form1 : Form
         _flashcardHost.Dock = DockStyle.Fill;
         _flashcardHost.BackColor = Color.Transparent;
         _flashcardHost.Resize += (_, _) => CenterFlashcardCard();
-        _flashcardCard.BackColor = Color.FromArgb(224, 239, 252);
-        _flashcardCard.BorderStyle = BorderStyle.FixedSingle;
+        // White card with a thin border and an accent strip along the top.
+        _flashcardCard.BackColor = BorderColor;
+        _flashcardCard.BorderStyle = BorderStyle.None;
+        _flashcardCard.Padding = new Padding(1, 6, 1, 1);
+        _flashcardCard.Paint += (_, e) =>
+        {
+            using var strip = new SolidBrush(Accent);
+            e.Graphics.FillRectangle(strip, 0, 0, _flashcardCard.Width, 6);
+        };
         _flashcardCard.Cursor = Cursors.Hand;
         _flashcardCard.Click += ToggleFlashcard;
+        _flashcardFace.BackColor = SurfaceColor;
+        _flashcardBackLayout.BackColor = SurfaceColor;
         _flashcardFace.Dock = DockStyle.Fill;
         _flashcardFace.Font = new Font("Segoe UI", 16F);
-        _flashcardFace.ForeColor = Color.FromArgb(60, 70, 82);
+        _flashcardFace.ForeColor = BodyTextColor;
         _flashcardFace.TextAlign = ContentAlignment.MiddleCenter;
         _flashcardFace.Cursor = Cursors.Hand;
         _flashcardFace.Click += ToggleFlashcard;
@@ -934,7 +1081,7 @@ public sealed partial class Form1 : Form
         _flashcardPinyin.Margin = Padding.Empty;
         _flashcardDetails.AutoSize = false;
         _flashcardDetails.Font = new Font("Segoe UI", 16F);
-        _flashcardDetails.ForeColor = Color.FromArgb(60, 70, 82);
+        _flashcardDetails.ForeColor = BodyTextColor;
         _flashcardDetails.TextAlign = ContentAlignment.MiddleCenter;
         _flashcardDetails.Margin = Padding.Empty;
         _flashcardPinyin.Cursor = Cursors.Hand;
@@ -965,7 +1112,7 @@ public sealed partial class Form1 : Form
         {
             Text = "Nhấn vào thẻ để xem nghĩa hoặc nhấn “Đọc từ” để nghe phát âm tiếng Trung.",
             Dock = DockStyle.Fill,
-            ForeColor = Color.FromArgb(90, 100, 112),
+            ForeColor = MutedTextColor,
             TextAlign = ContentAlignment.TopCenter
         };
         layout.Controls.Add(title, 0, 0);
@@ -1007,10 +1154,13 @@ public sealed partial class Form1 : Form
         _practiceMeaning.TextAlign = ContentAlignment.MiddleCenter;
         _practiceEnglishMeaning.Dock = DockStyle.Fill;
         _practiceEnglishMeaning.Font = new Font("Segoe UI", 15F);
-        _practiceEnglishMeaning.ForeColor = Color.FromArgb(90, 100, 112);
+        _practiceEnglishMeaning.ForeColor = MutedTextColor;
         _practiceEnglishMeaning.TextAlign = ContentAlignment.MiddleCenter;
         _answerBox.Anchor = AnchorStyles.None;
         _answerBox.Font = new Font("Microsoft YaHei UI", 22F);
+        _answerBox.BorderStyle = BorderStyle.FixedSingle;
+        _answerBox.BackColor = SurfaceColor;
+        _answerBox.ForeColor = TextColor;
         _answerBox.ImeMode = ImeMode.On;
         _answerBox.MaxLength = 100;
         _answerBox.Size = new Size(430, 48);
@@ -1025,23 +1175,11 @@ public sealed partial class Form1 : Form
         continueStudyButton.Anchor = AnchorStyles.None;
         _pausePracticeButton.Text = "Tạm dừng";
         _pausePracticeButton.Anchor = AnchorStyles.None;
-        _pausePracticeButton.AutoSize = true;
-        _pausePracticeButton.FlatStyle = FlatStyle.Flat;
-        _pausePracticeButton.BackColor = Color.FromArgb(232, 239, 246);
-        _pausePracticeButton.ForeColor = Color.FromArgb(35, 48, 62);
-        _pausePracticeButton.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
-        _pausePracticeButton.Padding = new Padding(12, 7, 12, 7);
-        _pausePracticeButton.UseVisualStyleBackColor = false;
+        StyleButton(_pausePracticeButton, ButtonKind.Secondary);
         _pausePracticeButton.Click += PausePracticeButton_Click;
         _skipPracticeButton.Text = "Bỏ qua";
         _skipPracticeButton.Anchor = AnchorStyles.None;
-        _skipPracticeButton.AutoSize = true;
-        _skipPracticeButton.FlatStyle = FlatStyle.Flat;
-        _skipPracticeButton.BackColor = Color.FromArgb(232, 239, 246);
-        _skipPracticeButton.ForeColor = Color.FromArgb(35, 48, 62);
-        _skipPracticeButton.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
-        _skipPracticeButton.Padding = new Padding(12, 7, 12, 7);
-        _skipPracticeButton.UseVisualStyleBackColor = false;
+        StyleButton(_skipPracticeButton, ButtonKind.Secondary);
         _skipPracticeButton.Click += SkipPracticeButton_Click;
         var practiceActions = new FlowLayoutPanel
         {
@@ -1054,9 +1192,9 @@ public sealed partial class Form1 : Form
         var practiceModeBox = new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
-            Font = new Font("Segoe UI", 10F),
+            Font = new Font("Segoe UI", 10.5F),
             Margin = new Padding(12, 6, 3, 3),
-            Width = 170
+            Width = 180
         };
         practiceModeBox.Items.AddRange(["Gõ từ vựng", "Gõ câu ví dụ"]);
         practiceModeBox.SelectedIndex = 0;
@@ -1071,14 +1209,14 @@ public sealed partial class Form1 : Form
         _practiceScoreLabel.TextAlign = ContentAlignment.MiddleCenter;
         _reviewIncorrectWordsButton.Text = "Xem từ đã sai";
         _reviewIncorrectWordsButton.Margin = new Padding(8, 5, 0, 3);
-        _reviewIncorrectWordsButton.AutoSize = true;
+        StyleButton(_reviewIncorrectWordsButton, ButtonKind.Secondary);
         _reviewIncorrectWordsButton.Click += ReviewIncorrectWordsButton_Click;
         _practiceFeedback.Dock = DockStyle.Fill;
         _practiceFeedback.Font = new Font("Segoe UI", 14F, FontStyle.Bold);
         _practiceFeedback.TextAlign = ContentAlignment.TopCenter;
         UpdatePracticeHint();
         _practiceHint.Dock = DockStyle.Fill;
-        _practiceHint.ForeColor = Color.FromArgb(90, 100, 112);
+        _practiceHint.ForeColor = MutedTextColor;
         _practiceHint.TextAlign = ContentAlignment.TopCenter;
 
         // Top row: title on the left, mode picker and missed-words button top right.
@@ -1096,14 +1234,23 @@ public sealed partial class Form1 : Form
         var topBar = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 2,
+            ColumnCount = 3,
             RowCount = 1,
             Margin = Padding.Empty
         };
+        // An empty left column as wide as the tools keeps the title centred.
+        var toolsWidth = topRightTools.PreferredSize.Width;
+        topBar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, toolsWidth));
         topBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        topBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        topBar.Controls.Add(title, 0, 0);
-        topBar.Controls.Add(topRightTools, 1, 0);
+        topBar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, toolsWidth));
+        topBar.Controls.Add(title, 1, 0);
+        topBar.Controls.Add(topRightTools, 2, 0);
+        // The missed-words button text grows with its count; keep both side columns in step.
+        topRightTools.SizeChanged += (_, _) =>
+        {
+            topBar.ColumnStyles[0].Width = topRightTools.Width;
+            topBar.ColumnStyles[2].Width = topRightTools.Width;
+        };
 
         layout.Controls.Add(topBar, 0, 0);
         layout.Controls.Add(_practiceMeaning, 0, 1);
@@ -1114,7 +1261,8 @@ public sealed partial class Form1 : Form
         layout.Controls.Add(_practiceScoreLabel, 0, 6);
         layout.Controls.Add(_practiceFeedback, 0, 8);
         layout.Controls.Add(_practiceHint, 0, 9);
-        page.Controls.Add(layout);
+        page.Padding = new Padding(20);
+        page.Controls.Add(CreateCard(layout, new Padding(8)));
         return page;
     }
 
@@ -3107,7 +3255,7 @@ public sealed partial class Form1 : Form
         _practiceEnglishMeaning.HighlightKeys = highlightKeys;
         _practiceFeedback.HighlightKeys = highlightKeys;
         _practiceFeedback.Text = string.Empty;
-        _practiceFeedback.ForeColor = Color.FromArgb(60, 70, 82);
+        _practiceFeedback.ForeColor = BodyTextColor;
         _answerChecked = false;
         _answerBox.Clear();
         _questionStopwatch.Restart();
@@ -3269,7 +3417,7 @@ public sealed partial class Form1 : Form
         {
             _correctAnswerCount++;
             _practiceFeedback.Text = "Chính xác! Giỏi lắm.";
-            _practiceFeedback.ForeColor = Color.ForestGreen;
+            _practiceFeedback.ForeColor = SuccessColor;
         }
         else
         {
@@ -3279,7 +3427,7 @@ public sealed partial class Form1 : Form
                 ? $"Hết giờ! Đáp án: {FormatPracticeAnswer(word)}"
                 : $"Chưa đúng. Đáp án: {FormatPracticeAnswer(word)}";
             // In example mode the word inside the answer is red, so the rest stays dark.
-            _practiceFeedback.ForeColor = _practiceExampleMode ? Color.FromArgb(60, 70, 82) : Color.Firebrick;
+            _practiceFeedback.ForeColor = _practiceExampleMode ? BodyTextColor : Color.Firebrick;
         }
 
         _answerChecked = true;
@@ -3640,28 +3788,54 @@ public sealed partial class Form1 : Form
         new()
         {
             Text = text,
-            Font = new Font("Segoe UI", 18F, FontStyle.Bold),
-            ForeColor = Color.FromArgb(35, 48, 62),
+            Font = new Font("Segoe UI Semibold", 17F),
+            ForeColor = TextColor,
             TextAlign = ContentAlignment.MiddleCenter
         };
 
-    private static Button CreateButton(string text, EventHandler onClick, bool secondary = false)
+    private static Button CreateButton(
+        string text,
+        EventHandler onClick,
+        bool secondary = false,
+        bool danger = false)
     {
-        var button = new Button
-        {
-            AutoSize = true,
-            BackColor = secondary ? Color.FromArgb(232, 239, 246) : Accent,
-            FlatStyle = FlatStyle.Flat,
-            Font = new Font("Segoe UI", 10F, FontStyle.Bold),
-            ForeColor = secondary ? Color.FromArgb(35, 48, 62) : Color.White,
-            Margin = new Padding(0, 0, 10, 0),
-            Padding = new Padding(12, 7, 12, 7),
-            Text = text,
-            UseVisualStyleBackColor = false
-        };
-        button.FlatAppearance.BorderSize = 0;
+        var button = new Button { Text = text, Margin = new Padding(0, 0, 10, 0) };
+        StyleButton(button, danger ? ButtonKind.Danger : secondary ? ButtonKind.Secondary : ButtonKind.Primary);
         button.Click += onClick;
         return button;
+    }
+
+    // Flat, borderless buttons with hover/pressed colours shared across the app.
+    private static void StyleButton(Button button, ButtonKind kind)
+    {
+        var (back, hover, pressed, fore) = kind switch
+        {
+            ButtonKind.Primary => (Accent, AccentHover, AccentPressed, Color.White),
+            ButtonKind.Danger => (DangerSoft, DangerSoftHover, DangerSoftHover, DangerText),
+            _ => (AccentSoft, AccentSoftHover, AccentSoftHover, Accent)
+        };
+        button.AutoSize = true;
+        button.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        button.BackColor = back;
+        button.ForeColor = fore;
+        button.FlatStyle = FlatStyle.Flat;
+        button.FlatAppearance.BorderSize = 0;
+        button.FlatAppearance.MouseOverBackColor = hover;
+        button.FlatAppearance.MouseDownBackColor = pressed;
+        button.Font = new Font("Segoe UI Semibold", 10F);
+        button.Padding = new Padding(14, 7, 14, 7);
+        button.Cursor = Cursors.Hand;
+        button.UseVisualStyleBackColor = false;
+    }
+
+    // A white panel with a 1px border, used to group content into cards.
+    private static Panel CreateCard(Control content, Padding padding)
+    {
+        var inner = new Panel { Dock = DockStyle.Fill, BackColor = SurfaceColor, Padding = padding };
+        inner.Controls.Add(content);
+        var border = new Panel { Dock = DockStyle.Fill, BackColor = BorderColor, Padding = new Padding(1) };
+        border.Controls.Add(inner);
+        return border;
     }
 
     private static bool IsValid(VocabularyWord word) =>
