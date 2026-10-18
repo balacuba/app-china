@@ -1134,7 +1134,7 @@ public sealed partial class Form1 : Form
             RowCount = 10,
             Padding = new Padding(32)
         };
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 14));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 104));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 11));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 11));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 20));
@@ -1189,16 +1189,30 @@ public sealed partial class Form1 : Form
             FlowDirection = FlowDirection.LeftToRight,
             WrapContents = false
         };
-        var practiceModeBox = new ComboBox
+        // Mode picker: a rounded button (same look as the others) that opens a menu.
+        string[] practiceModes = ["Gõ từ vựng", "Gõ câu ví dụ"];
+        var practiceModeBox = new RoundedButton();
+        StyleButton(practiceModeBox, ButtonKind.Secondary);
+        var practiceModeMenu = new ContextMenuStrip { Font = new Font(UiFontName, 10.5F), ShowImageMargin = false };
+        void SelectPracticeMode(int index)
         {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Font = new Font("Segoe UI", 10.5F),
-            Margin = new Padding(12, 6, 3, 3),
-            Width = 180
-        };
-        practiceModeBox.Items.AddRange(["Gõ từ vựng", "Gõ câu ví dụ"]);
-        practiceModeBox.SelectedIndex = 0;
-        practiceModeBox.SelectedIndexChanged += (_, _) => SetPracticeExampleMode(practiceModeBox.SelectedIndex == 1);
+            practiceModeBox.Text = $"{practiceModes[index]}  ▾";
+            for (var i = 0; i < practiceModeMenu.Items.Count; i++)
+            {
+                ((ToolStripMenuItem)practiceModeMenu.Items[i]).Checked = i == index;
+            }
+
+            SetPracticeExampleMode(index == 1);
+        }
+
+        for (var i = 0; i < practiceModes.Length; i++)
+        {
+            var index = i;
+            practiceModeMenu.Items.Add(new ToolStripMenuItem(practiceModes[i], null, (_, _) => SelectPracticeMode(index)));
+        }
+
+        practiceModeBox.Click += (_, _) => practiceModeMenu.Show(practiceModeBox, new Point(0, practiceModeBox.Height));
+        SelectPracticeMode(0);
         practiceActions.Controls.AddRange([continueStudyButton, _pausePracticeButton, _skipPracticeButton]);
         _practiceTimerLabel.Dock = DockStyle.Fill;
         _practiceTimerLabel.Font = new Font("Segoe UI", 12F, FontStyle.Bold);
@@ -1208,7 +1222,6 @@ public sealed partial class Form1 : Form
         _practiceScoreLabel.Font = new Font("Segoe UI", 12F, FontStyle.Bold);
         _practiceScoreLabel.TextAlign = ContentAlignment.MiddleCenter;
         _reviewIncorrectWordsButton.Text = "Xem từ đã sai";
-        _reviewIncorrectWordsButton.Margin = new Padding(8, 5, 0, 3);
         StyleButton(_reviewIncorrectWordsButton, ButtonKind.Secondary);
         _reviewIncorrectWordsButton.Click += ReviewIncorrectWordsButton_Click;
         _practiceFeedback.Dock = DockStyle.Fill;
@@ -1229,34 +1242,29 @@ public sealed partial class Form1 : Form
             WrapContents = false,
             Margin = Padding.Empty
         };
-        practiceModeBox.Margin = new Padding(0, 6, 0, 3);
+        // Both top-right buttons share one fixed size so they line up.
+        foreach (var button in new Button[] { practiceModeBox, _reviewIncorrectWordsButton })
+        {
+            button.AutoSize = false;
+            button.Size = new Size(200, 40);
+        }
+
+        practiceModeBox.Margin = new Padding(0, 3, 0, 3);
+        _reviewIncorrectWordsButton.Margin = new Padding(10, 3, 0, 3);
         topRightTools.Controls.AddRange([practiceModeBox, _reviewIncorrectWordsButton]);
         var topBar = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 3,
-            RowCount = 1,
+            ColumnCount = 1,
+            RowCount = 2,
             Margin = Padding.Empty
         };
-        // An empty left column as wide as the tools keeps the title centred.
-        var toolsWidth = topRightTools.PreferredSize.Width;
-        topBar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, toolsWidth));
-        topBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        topBar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, toolsWidth));
-        topBar.Controls.Add(title, 1, 0);
-        topBar.Controls.Add(topRightTools, 2, 0);
-        // The missed-words button text grows with its count; keep both side columns in step.
-        // The panel cannot grow past its fixed column, so size the columns from the
-        // tools' preferred width whenever the button resizes.
-        void SyncToolsWidth()
-        {
-            var width = topRightTools.GetPreferredSize(Size.Empty).Width;
-            topBar.ColumnStyles[0].Width = width;
-            topBar.ColumnStyles[2].Width = width;
-        }
-
-        _reviewIncorrectWordsButton.SizeChanged += (_, _) => SyncToolsWidth();
-        SyncToolsWidth();
+        // Tools sit on their own row in the top-right corner; the title below gets
+        // the full width so it stays on one centred line.
+        topBar.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        topBar.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        topBar.Controls.Add(topRightTools, 0, 0);
+        topBar.Controls.Add(title, 0, 1);
 
         layout.Controls.Add(topBar, 0, 0);
         layout.Controls.Add(_practiceMeaning, 0, 1);
