@@ -137,8 +137,6 @@ public sealed partial class Form1 : Form
     private int _practiceDurationSeconds = 10;
     private int _correctAnswerCount;
     private int _wrongAnswerCount;
-    // Switches typing practice between words (0) and example sentences (1).
-    private Action<int>? _selectPracticeMode;
     private long _advanceAt;
     private long _pausedAdvanceRemaining;
     private bool _showingMeaning;
@@ -300,79 +298,17 @@ public sealed partial class Form1 : Form
             _flashcardFlipTimer.Dispose();
             ReleaseSpeechVoice();
         };
+        // Only study data carries over; the app always opens on Home.
         var appState = AppState.Load();
-        RestoreSessionFilters(appState);
+        _correctAnswerCount = Math.Max(0, appState.CorrectAnswers);
+        _wrongAnswerCount = Math.Max(0, appState.WrongAnswers);
         UpdatePracticeScore();
         RefreshVocabulary();
         RefreshStudyWords();
         AdjustColumnWidths();
-        RestoreSessionView(appState);
-        FormClosing += (_, _) => SaveAppState();
-    }
-
-    // Last session's word list filters and typing score (before the lists fill).
-    private void RestoreSessionFilters(AppState state)
-    {
-        _correctAnswerCount = Math.Max(0, state.CorrectAnswers);
-        _wrongAnswerCount = Math.Max(0, state.WrongAnswers);
-        if (state.HskFilter is { Count: > 0 } hskFilter)
-        {
-            _columnFilters[nameof(VocabularyWord.HskLevel)] = hskFilter.ToHashSet(StringComparer.Ordinal);
-            if (_grid.Columns[nameof(VocabularyWord.HskLevel)] is { } column)
-            {
-                UpdateColumnFilterHeader(column);
-            }
-        }
-
-        _searchBox.Text = state.SearchText ?? string.Empty;
-    }
-
-    // Last session's window, practice mode and open page.
-    private void RestoreSessionView(AppState state)
-    {
-        var bounds = new Rectangle(state.WindowX, state.WindowY, state.WindowWidth, state.WindowHeight);
-        // Only reuse the old window if it still fits on a connected screen.
-        if (bounds.Width >= MinimumSize.Width && bounds.Height >= MinimumSize.Height &&
-            Screen.AllScreens.Any(screen => screen.WorkingArea.IntersectsWith(bounds)))
-        {
-            StartPosition = FormStartPosition.Manual;
-            Bounds = bounds;
-        }
-
-        if (state.WindowMaximized)
-        {
-            WindowState = FormWindowState.Maximized;
-        }
-
-        if (state.PracticeExampleMode)
-        {
-            _selectPracticeMode?.Invoke(1);
-        }
-
-        if (_tabs is not null && state.PageIndex > 0 && state.PageIndex < _tabs.TabCount)
-        {
-            _tabs.SelectedIndex = state.PageIndex;
-        }
-    }
-
-    private void SaveAppState()
-    {
-        // The normal (not maximized) size is kept, so un-maximizing later still fits.
-        var bounds = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
-        new AppState
+        FormClosing += (_, _) => new AppState
         {
             UserName = _userName,
-            WindowX = bounds.X,
-            WindowY = bounds.Y,
-            WindowWidth = bounds.Width,
-            WindowHeight = bounds.Height,
-            WindowMaximized = WindowState == FormWindowState.Maximized,
-            PageIndex = _tabs?.SelectedIndex ?? 0,
-            HskFilter = _columnFilters.TryGetValue(nameof(VocabularyWord.HskLevel), out var hskFilter)
-                ? hskFilter.ToList()
-                : null,
-            SearchText = _searchBox.Text,
-            PracticeExampleMode = _practiceExampleMode,
             CorrectAnswers = _correctAnswerCount,
             WrongAnswers = _wrongAnswerCount
         }.Save();
@@ -2081,7 +2017,6 @@ public sealed partial class Form1 : Form
 
         checkPracticeMode = AttachRoundedMenu(practiceModeBox, practiceModes, SelectPracticeMode);
         SelectPracticeMode(0);
-        _selectPracticeMode = SelectPracticeMode;
         practiceActions.Controls.AddRange([continueStudyButton, _pausePracticeButton, _skipPracticeButton]);
         _practiceTimerLabel.Dock = DockStyle.Fill;
         _practiceTimerLabel.Font = new Font("Segoe UI", 12F, FontStyle.Bold);

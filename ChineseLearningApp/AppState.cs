@@ -3,9 +3,9 @@ using System.Text.Json;
 
 namespace ChineseLearningApp;
 
-// Everything about the last session that is not stored elsewhere: the user's
-// name, the window, the open page, the word list filters, the practice mode
-// and the typing score. Saved when the app closes, read when it starts.
+// Study data from the last session that is not stored elsewhere: the user's
+// name and the typing score. Only data is kept; the app always reopens on Home
+// with its usual window and no filters. Saved on close, read at startup.
 internal sealed class AppState
 {
     private static readonly string FilePath = Path.Combine(
@@ -14,15 +14,6 @@ internal sealed class AppState
         "app-state.json");
 
     public string UserName { get; set; } = string.Empty;
-    public int WindowX { get; set; }
-    public int WindowY { get; set; }
-    public int WindowWidth { get; set; }
-    public int WindowHeight { get; set; }
-    public bool WindowMaximized { get; set; }
-    public int PageIndex { get; set; }
-    public List<string>? HskFilter { get; set; }
-    public string SearchText { get; set; } = string.Empty;
-    public bool PracticeExampleMode { get; set; }
     public int CorrectAnswers { get; set; }
     public int WrongAnswers { get; set; }
 
