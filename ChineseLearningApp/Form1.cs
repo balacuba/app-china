@@ -3408,7 +3408,7 @@ public sealed partial class Form1 : Form
         }
 
         return word.Chinese.Contains(searchText, StringComparison.CurrentCultureIgnoreCase) ||
-            word.Pinyin.Contains(searchText, StringComparison.CurrentCultureIgnoreCase) ||
+            MatchesPinyin(word.Pinyin, searchText) ||
             word.Vietnamese.Contains(searchText, StringComparison.CurrentCultureIgnoreCase) ||
             word.English.Contains(searchText, StringComparison.CurrentCultureIgnoreCase) ||
             word.EnglishExample.Contains(searchText, StringComparison.CurrentCultureIgnoreCase) ||
@@ -3417,6 +3417,36 @@ public sealed partial class Form1 : Form
             word.VietnameseGrammar.Contains(searchText, StringComparison.CurrentCultureIgnoreCase) ||
             word.VietnameseExample.Contains(searchText, StringComparison.CurrentCultureIgnoreCase) ||
             word.HskLevel.Contains(searchText, StringComparison.CurrentCultureIgnoreCase);
+    }
+
+    private static bool MatchesPinyin(string pinyin, string searchText)
+    {
+        if (pinyin.Contains(searchText, StringComparison.CurrentCultureIgnoreCase))
+        {
+            return true;
+        }
+
+        var query = NormalizePinyin(searchText);
+        return query.Length > 0 && NormalizePinyin(pinyin).Contains(query, StringComparison.Ordinal);
+    }
+
+    // Lowercases and drops tone marks, spaces and apostrophes; ü and a typed "v" both become u.
+    private static string NormalizePinyin(string text)
+    {
+        var builder = new StringBuilder(text.Length);
+        foreach (var c in text.Normalize(NormalizationForm.FormD))
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.NonSpacingMark ||
+                char.IsWhiteSpace(c) || c is '\'' or '’' or '-')
+            {
+                continue;
+            }
+
+            var lower = char.ToLowerInvariant(c);
+            builder.Append(lower == 'v' ? 'u' : lower);
+        }
+
+        return builder.ToString();
     }
 
     private bool MatchesColumnFilters(VocabularyWord word)
@@ -3570,7 +3600,7 @@ public sealed partial class Form1 : Form
             var query = search.Text.Trim();
             var words = _visibleWords.Where(word => string.IsNullOrEmpty(query) ||
                 word.Chinese.Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
-                word.Pinyin.Contains(query, StringComparison.CurrentCultureIgnoreCase)).ToList();
+                MatchesPinyin(word.Pinyin, query)).ToList();
             wordList.BeginUpdate();
             try
             {
