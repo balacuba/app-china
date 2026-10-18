@@ -64,6 +64,15 @@ public sealed partial class Form1 : Form
     // Off until the saved selection was read, so a failed read is never overwritten.
     private bool _saveSelectedWords;
     private readonly Dictionary<string, bool> _columnVisibility = new(StringComparer.Ordinal);
+    // Per-column text size in points; columns not listed use DefaultCellFontSize.
+    private readonly Dictionary<string, float> _columnFontSizes = new(StringComparer.Ordinal);
+    private const float DefaultCellFontSize = 11F;
+    private const float MinimumCellFontSize = 8F;
+    private const float MaximumCellFontSize = 28F;
+    private readonly string _columnFontsPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "ChineseLearningApp",
+        "column-fonts.json");
     private readonly List<string> _columnOrder = new();
     private readonly Dictionary<string, int> _baseColumnWidths = new(StringComparer.Ordinal);
     private bool _fittingColumns;
@@ -211,6 +220,20 @@ public sealed partial class Form1 : Form
 
         try
         {
+            LoadColumnFontSettings();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
+        {
+            Shown += (_, _) => MessageBox.Show(
+                this,
+                $"Không thể đọc cỡ chữ các cột: {ex.Message}",
+                "Lỗi đọc cài đặt",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+
+        try
+        {
             LoadSelectedWords();
             _saveSelectedWords = true;
         }
@@ -241,25 +264,30 @@ public sealed partial class Form1 : Form
 
     // Sizes each text column to fit ~95% of its values (and its header), capped so
     // long example sentences do not stretch the grid; longer cells show a tooltip.
-    private void AdjustColumnWidths()
+    // Pass a column to re-measure only that one (e.g. after its text size changed).
+    private void AdjustColumnWidths(DataGridViewColumn? onlyColumn = null)
     {
         if (_words.Count == 0)
         {
             return;
         }
 
-        const int maxWidth = 520;
-        var cellFont = _grid.DefaultCellStyle.Font ?? _grid.Font;
         var headerFont = _grid.ColumnHeadersDefaultCellStyle.Font ?? _grid.Font;
         var cellPadding = _grid.DefaultCellStyle.Padding.Horizontal + 12;
         var properties = TypeDescriptor.GetProperties(typeof(VocabularyWord));
         foreach (DataGridViewColumn column in _grid.Columns)
         {
             if (column is not DataGridViewTextBoxColumn ||
+                (onlyColumn is not null && column != onlyColumn) ||
                 properties[column.DataPropertyName] is not { } property)
             {
                 continue;
             }
+
+            // Bigger text gets proportionally more room.
+            var cellFont = column.DefaultCellStyle.Font ?? _grid.DefaultCellStyle.Font ?? _grid.Font;
+            var scale = cellFont.Size / DefaultCellFontSize;
+            var maxWidth = (int)(520 * scale);
 
             var values = _words
                 .Select(word => Convert.ToString(property.GetValue(word), CultureInfo.CurrentCulture) ?? string.Empty)
@@ -272,7 +300,7 @@ public sealed partial class Form1 : Form
             _baseColumnWidths[column.Name] = Math.Clamp(
                 Math.Max(contentWidth, headerWidth),
                 60,
-                IsWrappingColumn(column.DataPropertyName) ? maxWidth : 240);
+                IsWrappingColumn(column.DataPropertyName) ? maxWidth : (int)(240 * scale));
         }
 
         FitColumnsToGrid();
@@ -674,6 +702,7 @@ public sealed partial class Form1 : Form
             column.FillWeight = 1;
             column.ReadOnly = column.DataPropertyName != nameof(VocabularyWord.IsSelected) &&
                 !IsEditableTextColumn(column.DataPropertyName);
+            ApplyColumnFont(column);
             if (IsFilterableColumn(column.DataPropertyName))
             {
                 column.HeaderText = $"{column.HeaderText}  ▼";
@@ -932,22 +961,110 @@ public sealed partial class Form1 : Form
         var orderCard = CreateSettingsSection("↕", Color.FromArgb(254, 243, 199), "Thứ tự cột",
             "Chọn một cột rồi bấm Lên / Xuống để đổi vị trí.", orderBody);
 
+        // Text size per column: − / size / + for every text column, three per row.
+        var textColumns = _grid.Columns.Cast<DataGridViewColumn>()
+            .Where(column => column is DataGridViewTextBoxColumn)
+            .OrderBy(column => column.DisplayIndex)
+            .ToList();
+        const int fontColumns = 3;
+        var fontRows = (textColumns.Count + fontColumns - 1) / fontColumns;
+        var fontGrid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = fontColumns, RowCount = fontRows + 1, BackColor = SurfaceColor };
+        for (var column = 0; column < fontColumns; column++)
+        {
+            fontGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F / fontColumns));
+        }
+
+        var fontRefreshers = new List<Action>();
+        for (var index = 0; index < textColumns.Count; index++)
+        {
+            var column = textColumns[index];
+            var item = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, BackColor = SurfaceColor, Margin = new Padding(0, 0, 24, 0) };
+            item.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            item.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            item.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            item.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            var name = new Label
+            {
+                Dock = DockStyle.Fill,
+                Text = Convert.ToString(column.Tag, CultureInfo.CurrentCulture) ?? column.HeaderText,
+                Font = new Font(UiFontName, 11F),
+                ForeColor = BodyTextColor,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            var value = new PillLabel
+            {
+                AutoSize = false,
+                Size = new Size(70, 34),
+                Font = new Font(UiFontName, 10.5F, FontStyle.Bold),
+                ForeColor = Accent,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Margin = new Padding(6, 3, 6, 3)
+            };
+            void ShowSize() => value.Text = $"{GetColumnFontSize(column):0.#} pt";
+            ShowSize();
+            fontRefreshers.Add(ShowSize);
+            Button SizeButton(string text, float step)
+            {
+                var button = CreateButton(text, (_, _) =>
+                {
+                    SetColumnFontSize(column, GetColumnFontSize(column) + step);
+                    ShowSize();
+                }, secondary: true);
+                button.AutoSize = false;
+                button.Size = new Size(36, 34);
+                button.Padding = Padding.Empty;
+                button.Margin = new Padding(0, 3, 0, 3);
+                button.Font = new Font(UiFontName, 12F, FontStyle.Bold);
+                return button;
+            }
+
+            item.Controls.Add(name, 0, 0);
+            item.Controls.Add(SizeButton("−", -1), 1, 0);
+            item.Controls.Add(value, 2, 0);
+            item.Controls.Add(SizeButton("+", 1), 3, 0);
+            fontGrid.Controls.Add(item, index % fontColumns, index / fontColumns);
+        }
+
+        for (var row = 0; row < fontRows; row++)
+        {
+            fontGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
+        }
+
+        fontGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
+        var resetFonts = CreateButton("↺  Đặt lại cỡ chữ mặc định", (_, _) =>
+        {
+            foreach (var column in textColumns)
+            {
+                SetColumnFontSize(column, DefaultCellFontSize);
+            }
+
+            fontRefreshers.ForEach(refresh => refresh());
+        }, secondary: true);
+        resetFonts.Margin = new Padding(0, 12, 0, 0);
+        fontGrid.Controls.Add(resetFonts, 0, fontRows);
+        var fontsCard = CreateSettingsSection("🔠", Color.FromArgb(237, 233, 254), "Cỡ chữ từng cột",
+            $"Phóng to hoặc thu nhỏ chữ của mỗi cột trong danh sách từ ({MinimumCellFontSize:0}–{MaximumCellFontSize:0} pt).", fontGrid);
+
         const int headingHeight = 72;
         const int topRowHeight = 168;
         const int bottomRowHeight = 470;
-        var grid = new TableLayoutPanel { ColumnCount = 2, RowCount = 3, BackColor = PageColor };
+        var fontsRowHeight = 62 + fontRows * 44 + 52 + 34 + 20;
+        var grid = new TableLayoutPanel { ColumnCount = 2, RowCount = 4, BackColor = PageColor };
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         grid.RowStyles.Add(new RowStyle(SizeType.Absolute, headingHeight));
         grid.RowStyles.Add(new RowStyle(SizeType.Absolute, topRowHeight));
         grid.RowStyles.Add(new RowStyle(SizeType.Absolute, bottomRowHeight));
+        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, fontsRowHeight));
         grid.Controls.Add(heading, 0, 0);
         grid.SetColumnSpan(heading, 2);
         grid.Controls.Add(manageCard, 0, 1);
         grid.Controls.Add(practiceCard, 1, 1);
         grid.Controls.Add(columnsCard, 0, 2);
         grid.Controls.Add(orderCard, 1, 2);
-        grid.Height = headingHeight + topRowHeight + bottomRowHeight;
+        grid.Controls.Add(fontsCard, 0, 3);
+        grid.SetColumnSpan(fontsCard, 2);
+        grid.Height = headingHeight + topRowHeight + bottomRowHeight + fontsRowHeight;
         scroller.Controls.Add(grid);
 
         // Centred, at most 1180px wide; the panel scrolls when the window is short.
@@ -1240,6 +1357,61 @@ public sealed partial class Form1 : Form
             _columnSettingsPath,
             JsonSerializer.Serialize(_columnVisibility, JsonOptions),
             new UTF8Encoding(false));
+    }
+
+    private void LoadColumnFontSettings()
+    {
+        if (!File.Exists(_columnFontsPath))
+        {
+            return;
+        }
+
+        var json = File.ReadAllText(_columnFontsPath, Encoding.UTF8);
+        var saved = JsonSerializer.Deserialize<Dictionary<string, float>>(json)
+            ?? throw new InvalidDataException("Tệp cỡ chữ không chứa danh sách cột hợp lệ.");
+        foreach (var (name, size) in saved)
+        {
+            _columnFontSizes[name] = Math.Clamp(size, MinimumCellFontSize, MaximumCellFontSize);
+        }
+    }
+
+    private float GetColumnFontSize(DataGridViewColumn column) =>
+        _columnFontSizes.TryGetValue(column.Name, out var size) ? size : DefaultCellFontSize;
+
+    // Columns at the default size inherit the grid font; others get their own.
+    private void ApplyColumnFont(DataGridViewColumn column)
+    {
+        var size = GetColumnFontSize(column);
+        var old = column.DefaultCellStyle.Font;
+        column.DefaultCellStyle.Font = Math.Abs(size - DefaultCellFontSize) < 0.01F ? null : new Font(UiFontName, size);
+        old?.Dispose();
+    }
+
+    // Changes one column's text size, saves it and re-measures that column.
+    private void SetColumnFontSize(DataGridViewColumn column, float size)
+    {
+        size = Math.Clamp(size, MinimumCellFontSize, MaximumCellFontSize);
+        if (Math.Abs(size - DefaultCellFontSize) < 0.01F)
+        {
+            _columnFontSizes.Remove(column.Name);
+        }
+        else
+        {
+            _columnFontSizes[column.Name] = size;
+        }
+
+        ApplyColumnFont(column);
+        AdjustColumnWidths(column);
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_columnFontsPath)!);
+            File.WriteAllText(_columnFontsPath, JsonSerializer.Serialize(_columnFontSizes, JsonOptions), new UTF8Encoding(false));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            MessageBox.Show(this, $"Không thể lưu cỡ chữ: {ex.Message}", "Lỗi lưu cài đặt",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
 
     private void LoadSelectedWords()
