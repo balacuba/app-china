@@ -20,7 +20,7 @@ internal sealed class NameEntryForm : Form
         MaximizeBox = false;
         MinimizeBox = false;
         ShowInTaskbar = true;
-        ClientSize = new Size(460, 448);
+        ClientSize = new Size(460, 120 + 232 + AuthorFooter.CollapsedHeight);
         Font = new Font(Form1.UiFontName, 10F);
         BackColor = Form1.SurfaceColor;
 
@@ -78,7 +78,7 @@ internal sealed class NameEntryForm : Form
         var body = new RoundedBody
         {
             Location = new Point(0, 120),
-            Size = new Size(ClientSize.Width, ClientSize.Height - 120 - 96)
+            Size = new Size(ClientSize.Width, 232)
         };
 
         var prompt = new Label
@@ -132,7 +132,7 @@ internal sealed class NameEntryForm : Form
         cancelButton.DialogResult = DialogResult.Cancel;
 
         // Author's details along the bottom.
-        var footer = new AuthorFooter { Dock = DockStyle.Bottom, Height = 96 };
+        var footer = new AuthorFooter { Dock = DockStyle.Bottom };
 
         body.Controls.AddRange([prompt, _nameFrame, _validationLabel, cancelButton, continueButton]);
         Controls.AddRange([header, body, footer]);
@@ -184,20 +184,25 @@ internal sealed class NameEntryForm : Form
         }
     }
 
-    // "Made with ♥ by Tuấn Anh" over a rounded mail chip,
-    // on a soft tinted band.
+    // "Made with ♥ by Tuấn Anh" and a small round ✉ button on a soft tinted
+    // band. The mail address stays hidden until the button is clicked; the
+    // footer (and window) then grows to show it in a rounded chip.
     private sealed class AuthorFooter : Control
     {
+        public const int CollapsedHeight = 56;
+        public const int ExpandedHeight = 96;
+        private const string Mail = "camlinh.tk@gmail.com";
         private static readonly Font PlainFont = new(Form1.UiFontName, 10F);
         private static readonly Font NameFont = new("Segoe UI Semibold", 10.5F);
         private static readonly Font HeartFont = new("Segoe UI Emoji", 10F);
         private static readonly Font ChipFont = new(Form1.UiFontName, 9.5F);
-        private static readonly Font ChipIconFont = new("Segoe UI Emoji", 9.5F);
-
-        private static readonly (string Icon, string Text, Color Fill, Color Ink)[] Chips =
-        [
-            ("✉️", "camlinh.tk@gmail.com", Color.FromArgb(219, 234, 254), Color.FromArgb(29, 78, 216))
-        ];
+        private static readonly Font IconFont = new("Segoe UI Emoji", 9.5F);
+        private static readonly Color MailFill = Color.FromArgb(219, 234, 254);
+        private static readonly Color MailInk = Color.FromArgb(29, 78, 216);
+        private readonly ToolTip _tip = new();
+        private Rectangle _mailButton;
+        private bool _showMail;
+        private bool _hoverButton;
 
         public AuthorFooter()
         {
@@ -208,16 +213,68 @@ internal sealed class NameEntryForm : Form
                 ControlStyles.UserPaint,
                 true);
             BackColor = Form1.PageColor;
+            Height = CollapsedHeight;
+            _tip.SetToolTip(this, "Bấm ✉ để xem email");
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _tip.Dispose();
+            }
+
+            base.Dispose(disposing);
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            var over = _mailButton.Contains(e.Location);
+            if (over != _hoverButton)
+            {
+                _hoverButton = over;
+                Cursor = over ? Cursors.Hand : Cursors.Default;
+                Invalidate();
+            }
+
+            base.OnMouseMove(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            _hoverButton = false;
+            Cursor = Cursors.Default;
+            Invalidate();
+            base.OnMouseLeave(e);
+        }
+
+        // Clicking ✉ shows or hides the mail; the window grows or shrinks with it.
+        protected override void OnMouseClick(MouseEventArgs e)
+        {
+            base.OnMouseClick(e);
+            if (!_mailButton.Contains(e.Location))
+            {
+                return;
+            }
+
+            _showMail = !_showMail;
+            var change = ExpandedHeight - CollapsedHeight;
+            if (FindForm() is { } form)
+            {
+                form.ClientSize = new Size(form.ClientSize.Width, form.ClientSize.Height + (_showMail ? change : -change));
+            }
+
+            Height = _showMail ? ExpandedHeight : CollapsedHeight;
+            Invalidate();
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            // A softly tinted band with straight edges.
             var graphics = e.Graphics;
             graphics.Clear(FooterTint);
             graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
 
-            // Line 1: "Made with ♥ by Tuấn Anh", centred, name in accent.
+            // Line 1: "Made with ♥ by Tuấn Anh" and the ✉ button, centred together.
             const TextFormatFlags flags = TextFormatFlags.NoPadding | TextFormatFlags.VerticalCenter;
             var parts = new (string Text, Font Font, Color Color)[]
             {
@@ -226,39 +283,44 @@ internal sealed class NameEntryForm : Form
                 (" by ", PlainFont, Form1.MutedTextColor),
                 ("Tuấn Anh", NameFont, Form1.Accent)
             };
+            const int button = 28;
+            const int buttonGap = 10;
+            const int lineTop = 14;
             var widths = parts.Select(part => TextRenderer.MeasureText(graphics, part.Text, part.Font, Size.Empty, flags).Width).ToArray();
-            var x = (Width - widths.Sum()) / 2;
+            var x = (Width - widths.Sum() - buttonGap - button) / 2;
             for (var index = 0; index < parts.Length; index++)
             {
                 TextRenderer.DrawText(graphics, parts[index].Text, parts[index].Font,
-                    new Rectangle(x, 16, widths[index] + 2, 24), parts[index].Color, flags);
+                    new Rectangle(x, lineTop, widths[index] + 2, button), parts[index].Color, flags);
                 x += widths[index];
             }
 
-            // Line 2: rounded contact chips side by side.
-            const int chipHeight = 28;
-            const int gap = 10;
-            var chipWidths = Chips.Select(chip =>
-                TextRenderer.MeasureText(graphics, chip.Icon, ChipIconFont, Size.Empty, flags).Width + 6 +
-                TextRenderer.MeasureText(graphics, chip.Text, ChipFont, Size.Empty, flags).Width + 28).ToArray();
-            x = (Width - chipWidths.Sum() - gap * (Chips.Length - 1)) / 2;
-            const int top = 50;
-            for (var index = 0; index < Chips.Length; index++)
+            _mailButton = new Rectangle(x + buttonGap, lineTop, button, button);
+            using (var fill = new SolidBrush(_showMail || _hoverButton ? MailInk : MailFill))
             {
-                var (icon, text, fill, ink) = Chips[index];
-                var chip = new RectangleF(x, top, chipWidths[index], chipHeight);
-                using (var path = Form1.RoundedMenuRenderer.CreateRoundedPath(chip, chipHeight / 2F))
-                using (var brush = new SolidBrush(fill))
-                {
-                    graphics.FillPath(brush, path);
-                }
-
-                var iconWidth = TextRenderer.MeasureText(graphics, icon, ChipIconFont, Size.Empty, flags).Width;
-                TextRenderer.DrawText(graphics, icon, ChipIconFont, new Rectangle(x + 14, top, iconWidth + 2, chipHeight), ink, flags);
-                TextRenderer.DrawText(graphics, text, ChipFont,
-                    new Rectangle(x + 14 + iconWidth + 6, top, chipWidths[index], chipHeight), ink, flags);
-                x += chipWidths[index] + gap;
+                graphics.FillEllipse(fill, _mailButton);
             }
+
+            TextRenderer.DrawText(graphics, "✉", IconFont, _mailButton, _showMail || _hoverButton ? Color.White : MailInk,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+
+            // Line 2 (only once ✉ was clicked): the mail address in a rounded chip.
+            if (!_showMail)
+            {
+                return;
+            }
+
+            const int chipHeight = 28;
+            var textWidth = TextRenderer.MeasureText(graphics, Mail, ChipFont, Size.Empty, flags).Width;
+            var chip = new RectangleF((Width - textWidth - 32) / 2F, 52, textWidth + 32, chipHeight);
+            using (var path = Form1.RoundedMenuRenderer.CreateRoundedPath(chip, chipHeight / 2F))
+            using (var brush = new SolidBrush(MailFill))
+            {
+                graphics.FillPath(brush, path);
+            }
+
+            TextRenderer.DrawText(graphics, Mail, ChipFont, Rectangle.Round(chip), MailInk,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
         }
     }
 
