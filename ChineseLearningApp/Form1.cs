@@ -76,8 +76,9 @@ public sealed partial class Form1 : Form
     private readonly RoundedPanel _answerFrame = new();
     private readonly Panel _flashcardBackLayout = new();
     private readonly Label _flashcardFace = new();
-    private readonly Label _flashcardPinyin = new();
-    private readonly Label _flashcardDetails = new();
+    private readonly PillLabel _flashcardPinyin = new();
+    private readonly FlashcardDetailsView _flashcardDetailsLeft = new();
+    private readonly FlashcardDetailsView _flashcardDetailsRight = new();
     private readonly Label _practiceMeaning = new();
     private readonly HighlightLabel _practiceEnglishMeaning = new();
     private readonly HighlightLabel _practiceFeedback = new();
@@ -1055,11 +1056,11 @@ public sealed partial class Form1 : Form
         _flashcardHost.Resize += (_, _) => CenterFlashcardCard();
         // Rounded white card with a thin border and an accent strip along the top;
         // the padding keeps the content inside the rounded corners.
-        _flashcardCard.Radius = 16;
+        _flashcardCard.Radius = 28;
         _flashcardCard.StripColor = Accent;
         _flashcardCard.StripHeight = 6;
         _flashcardCard.OutlineColor = Color.FromArgb(203, 213, 225);
-        _flashcardCard.Padding = new Padding(10, 14, 10, 10);
+        _flashcardCard.Padding = new Padding(16, 18, 16, 16);
         _flashcardCard.Cursor = Cursors.Hand;
         _flashcardCard.Click += ToggleFlashcard;
         _flashcardFace.BackColor = SurfaceColor;
@@ -1074,22 +1075,23 @@ public sealed partial class Form1 : Form
         _flashcardBackLayout.Visible = false;
         _flashcardBackLayout.Resize += (_, _) => CenterFlashcardMeaningContent();
         _flashcardPinyin.AutoSize = false;
-        _flashcardPinyin.Font = new Font("Segoe UI", 32F, FontStyle.Bold);
+        _flashcardPinyin.Font = new Font("Segoe UI", 26F, FontStyle.Bold);
         _flashcardPinyin.ForeColor = Accent;
         _flashcardPinyin.TextAlign = ContentAlignment.MiddleCenter;
         _flashcardPinyin.Margin = Padding.Empty;
-        _flashcardDetails.AutoSize = false;
-        _flashcardDetails.Font = new Font("Segoe UI", 16F);
-        _flashcardDetails.ForeColor = BodyTextColor;
-        _flashcardDetails.TextAlign = ContentAlignment.MiddleCenter;
-        _flashcardDetails.Margin = Padding.Empty;
         _flashcardPinyin.Cursor = Cursors.Hand;
         _flashcardPinyin.Click += ToggleFlashcard;
-        _flashcardDetails.Cursor = Cursors.Hand;
-        _flashcardDetails.Click += ToggleFlashcard;
+        foreach (var details in new[] { _flashcardDetailsLeft, _flashcardDetailsRight })
+        {
+            details.Margin = Padding.Empty;
+            details.MaxColumns = 1;
+            details.Cursor = Cursors.Hand;
+            details.Click += ToggleFlashcard;
+            _flashcardBackLayout.Controls.Add(details);
+        }
+
         _flashcardBackLayout.Click += ToggleFlashcard;
         _flashcardBackLayout.Controls.Add(_flashcardPinyin);
-        _flashcardBackLayout.Controls.Add(_flashcardDetails);
         _flashcardCard.Controls.Add(_flashcardBackLayout);
         _flashcardCard.Controls.Add(_flashcardFace);
         _flashcardHost.Controls.Add(_flashcardCard);
@@ -2728,39 +2730,11 @@ public sealed partial class Form1 : Form
         Font font,
         Rectangle bounds,
         Color normalColor,
-        bool centerVertically)
+        bool centerVertically,
+        bool centerHorizontally = true)
     {
         const TextFormatFlags flags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine;
-        var spaceWidth = TextRenderer.MeasureText(graphics, "a a", font, Size.Empty, flags).Width -
-                         TextRenderer.MeasureText(graphics, "aa", font, Size.Empty, flags).Width;
-        var lineHeight = TextRenderer.MeasureText(graphics, "Ag汉", font, Size.Empty, flags).Height;
-
-        // Wrap like the grid does: CJK characters break anywhere, other text at spaces.
-        var lines = new List<List<(string Text, bool Highlight, int Width)>> { new() };
-        var lineWidth = 0;
-        foreach (var segment in segments)
-        {
-            foreach (System.Text.RegularExpressions.Match unit in
-                     System.Text.RegularExpressions.Regex.Matches(
-                         segment.Text,
-                         @"\p{IsCJKUnifiedIdeographs}|[^\s\p{IsCJKUnifiedIdeographs}]+\s*|\s+"))
-            {
-                var trimmed = unit.Value.TrimEnd();
-                var width = (trimmed.Length == 0
-                                ? 0
-                                : TextRenderer.MeasureText(graphics, trimmed, font, Size.Empty, flags).Width) +
-                            (unit.Value.Length - trimmed.Length) * spaceWidth;
-                if (lineWidth + width > bounds.Width && lines[^1].Count > 0)
-                {
-                    lines.Add(new List<(string Text, bool Highlight, int Width)>());
-                    lineWidth = 0;
-                }
-
-                lines[^1].Add((unit.Value, segment.Highlight, width));
-                lineWidth += width;
-            }
-        }
-
+        var (lines, lineHeight) = LayoutHighlightedSegments(graphics, segments, font, bounds.Width);
         var clip = graphics.Clip;
         graphics.SetClip(bounds);
         var y = centerVertically
@@ -2768,7 +2742,9 @@ public sealed partial class Form1 : Form
             : bounds.Top;
         foreach (var line in lines)
         {
-            var x = bounds.Left + Math.Max(0, (bounds.Width - line.Sum(unit => unit.Width)) / 2);
+            var x = centerHorizontally
+                ? bounds.Left + Math.Max(0, (bounds.Width - line.Sum(unit => unit.Width)) / 2)
+                : bounds.Left;
             foreach (var unit in line)
             {
                 TextRenderer.DrawText(
@@ -2785,6 +2761,45 @@ public sealed partial class Form1 : Form
         }
 
         graphics.Clip = clip;
+    }
+
+    // Wraps like the grid does: CJK characters break anywhere, other text at spaces.
+    private static (List<List<(string Text, bool Highlight, int Width)>> Lines, int LineHeight) LayoutHighlightedSegments(
+        IDeviceContext graphics,
+        IReadOnlyList<(string Text, bool Highlight)> segments,
+        Font font,
+        int maxWidth)
+    {
+        const TextFormatFlags flags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine;
+        var spaceWidth = TextRenderer.MeasureText(graphics, "a a", font, Size.Empty, flags).Width -
+                         TextRenderer.MeasureText(graphics, "aa", font, Size.Empty, flags).Width;
+        var lineHeight = TextRenderer.MeasureText(graphics, "Ag汉", font, Size.Empty, flags).Height;
+        var lines = new List<List<(string Text, bool Highlight, int Width)>> { new() };
+        var lineWidth = 0;
+        foreach (var segment in segments)
+        {
+            foreach (System.Text.RegularExpressions.Match unit in
+                     System.Text.RegularExpressions.Regex.Matches(
+                         segment.Text,
+                         @"\p{IsCJKUnifiedIdeographs}|[^\s\p{IsCJKUnifiedIdeographs}]+\s*|\s+"))
+            {
+                var trimmed = unit.Value.TrimEnd();
+                var width = (trimmed.Length == 0
+                                ? 0
+                                : TextRenderer.MeasureText(graphics, trimmed, font, Size.Empty, flags).Width) +
+                            (unit.Value.Length - trimmed.Length) * spaceWidth;
+                if (lineWidth + width > maxWidth && lines[^1].Count > 0)
+                {
+                    lines.Add(new List<(string Text, bool Highlight, int Width)>());
+                    lineWidth = 0;
+                }
+
+                lines[^1].Add((unit.Value, segment.Highlight, width));
+                lineWidth += width;
+            }
+        }
+
+        return (lines, lineHeight);
     }
 
     // A panel drawn as an anti-aliased rounded rectangle with an outline and an
@@ -3017,6 +3032,230 @@ public sealed partial class Form1 : Form
 
         protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
         {
+        }
+    }
+
+    // A label drawn as a rounded "pill" with a soft fill and border, text centred.
+    private sealed class PillLabel : Label
+    {
+        public Color FillColor { get; set; } = AccentSoft;
+        public Color OutlineColor { get; set; } = Color.FromArgb(147, 187, 250);
+
+        public PillLabel()
+        {
+            SetStyle(
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw |
+                ControlStyles.UserPaint,
+                true);
+        }
+
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var graphics = e.Graphics;
+            graphics.Clear(Parent?.BackColor ?? SurfaceColor);
+            graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            var bounds = new RectangleF(1F, 1F, Width - 2.5F, Height - 2.5F);
+            using (var path = RoundedMenuRenderer.CreateRoundedPath(bounds, bounds.Height / 2F))
+            using (var fill = new SolidBrush(FillColor))
+            using (var outline = new Pen(OutlineColor, 1.5F))
+            {
+                graphics.FillPath(fill, path);
+                graphics.DrawPath(outline, path);
+            }
+
+            TextRenderer.DrawText(
+                graphics,
+                Text,
+                Font,
+                ClientRectangle,
+                ForeColor,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+                TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+        }
+    }
+
+    private sealed record FlashcardDetailRow(
+        string Icon,
+        Color BadgeColor,
+        Color IconColor,
+        string Title,
+        string Value,
+        bool Centered = false);
+
+    // Flashcard back side: one row per detail with a round pastel icon badge, a
+    // small grey title and the value below it (the word drawn in red).
+    private sealed class FlashcardDetailsView : Control
+    {
+        private const int BadgeSize = 30;
+        private const int TextIndent = 42;
+        private const int RowGap = 10;
+        private const int ColumnGap = 28;
+        private const int TwoColumnMinWidth = 620;
+        private const int MaxContentWidth = 940;
+        private static readonly Font TitleFont = new("Segoe UI Semibold", 9F);
+        private static readonly Font ValueFont = new(UiFontName, 12F);
+        private static readonly Font IconFont = new("Segoe UI Emoji", 12F);
+        private IReadOnlyList<FlashcardDetailRow> _rows = [];
+        public int MaxColumns { get; set; } = 2;
+        private IReadOnlyList<string> _highlightKeys = [];
+
+        public FlashcardDetailsView()
+        {
+            SetStyle(
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw |
+                ControlStyles.UserPaint,
+                true);
+            BackColor = SurfaceColor;
+        }
+
+        public void SetContent(IReadOnlyList<FlashcardDetailRow> rows, IReadOnlyList<string> highlightKeys)
+        {
+            _rows = rows;
+            _highlightKeys = highlightKeys;
+            Invalidate();
+        }
+
+        public int GetContentHeight(int width)
+        {
+            using var bitmap = new Bitmap(1, 1);
+            using var graphics = Graphics.FromImage(bitmap);
+            var cells = MeasureCells(graphics, Math.Min(width, MaxContentWidth), out _, out _);
+            return cells.Count == 0 ? 0 : cells.Max(cell => cell.Top + cell.Height);
+        }
+
+        // Wide cards show the rows in two columns (filled left to right, top to bottom).
+        private List<(FlashcardDetailRow Row, int Left, int Top, int Height, int TitleHeight, int ValueHeight)> MeasureCells(
+            IDeviceContext graphics,
+            int contentWidth,
+            out int columns,
+            out int columnWidth)
+        {
+            columns = MaxColumns > 1 && contentWidth >= TwoColumnMinWidth ? 2 : 1;
+            columnWidth = (contentWidth - ColumnGap * (columns - 1)) / columns;
+            var titleHeight = TextRenderer.MeasureText(graphics, "Ag", TitleFont).Height;
+            var width = columnWidth;
+            var measured = _rows.Select(row =>
+            {
+                var (lines, lineHeight) = LayoutHighlightedSegments(
+                    graphics,
+                    SplitHighlightedWord(row.Value, _highlightKeys),
+                    ValueFont,
+                    Math.Max(40, width - TextIndent));
+                var valueHeight = lines.Count * lineHeight;
+                var textWidth = Math.Max(
+                    TextRenderer.MeasureText(graphics, row.Title, TitleFont).Width,
+                    lines.Max(line => line.Sum(unit => unit.Width)));
+                return (
+                    Row: row,
+                    Height: Math.Max(BadgeSize, titleHeight + valueHeight),
+                    ValueHeight: valueHeight,
+                    BlockWidth: Math.Min(width, TextIndent + textWidth));
+            }).ToList();
+
+            // Each column's block (as wide as its widest item) is centred in its half,
+            // so both columns sit evenly in the card while staying left-aligned inside.
+            // Rows pair up (left, right); a Centered row takes a band of its own in the middle.
+            var bands = new List<List<(FlashcardDetailRow Row, int Height, int ValueHeight, int BlockWidth)>>();
+            var index = 0;
+            while (index < measured.Count)
+            {
+                var band = new List<(FlashcardDetailRow Row, int Height, int ValueHeight, int BlockWidth)> { measured[index++] };
+                while (band.Count < columns &&
+                       !band[0].Row.Centered &&
+                       index < measured.Count &&
+                       !measured[index].Row.Centered)
+                {
+                    band.Add(measured[index++]);
+                }
+
+                bands.Add(band);
+            }
+
+            var columnCount = columns;
+            var columnOffsets = new int[columns];
+            for (var column = 0; column < columns; column++)
+            {
+                var current = column;
+                var widest = bands
+                    .Where(band => band.Count == columnCount)
+                    .Select(band => band[current].BlockWidth)
+                    .DefaultIfEmpty(columnWidth)
+                    .Max();
+                columnOffsets[column] = column * (columnWidth + ColumnGap) + Math.Max(0, (columnWidth - widest) / 2);
+            }
+
+            var cells = new List<(FlashcardDetailRow Row, int Left, int Top, int Height, int TitleHeight, int ValueHeight)>();
+            var top = 0;
+            foreach (var band in bands)
+            {
+                var bandHeight = band.Max(item => item.Height);
+                for (var column = 0; column < band.Count; column++)
+                {
+                    // A row on its own is centred by the real width of its icon and text.
+                    var left = band[column].Row.Centered || (columns > 1 && band.Count == 1)
+                        ? (contentWidth - band[column].BlockWidth) / 2
+                        : columnOffsets[column];
+                    cells.Add((band[column].Row, left, top, bandHeight, titleHeight, band[column].ValueHeight));
+                }
+
+                top += bandHeight + RowGap;
+            }
+
+            return cells;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var graphics = e.Graphics;
+            graphics.Clear(BackColor);
+            var contentWidth = Math.Min(Width, MaxContentWidth);
+            var origin = (Width - contentWidth) / 2;
+            foreach (var (row, cellLeft, y, height, titleHeight, valueHeight) in
+                     MeasureCells(graphics, contentWidth, out _, out var columnWidth))
+            {
+                var left = origin + cellLeft;
+                // Each cell is aligned to the top of its band, centred on its own content.
+                var ownHeight = Math.Min(height, Math.Max(BadgeSize, titleHeight + valueHeight));
+                graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                var badge = new Rectangle(left, y + (ownHeight - BadgeSize) / 2, BadgeSize, BadgeSize);
+                using (var badgeBrush = new SolidBrush(row.BadgeColor))
+                {
+                    graphics.FillEllipse(badgeBrush, badge);
+                }
+
+                graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.Default;
+                TextRenderer.DrawText(
+                    graphics,
+                    row.Icon,
+                    IconFont,
+                    badge,
+                    row.IconColor,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                var textTop = y + (ownHeight - titleHeight - valueHeight) / 2;
+                TextRenderer.DrawText(
+                    graphics,
+                    row.Title,
+                    TitleFont,
+                    new Point(left + TextIndent, textTop),
+                    MutedTextColor,
+                    TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+                DrawHighlightedSegments(
+                    graphics,
+                    SplitHighlightedWord(row.Value, _highlightKeys),
+                    ValueFont,
+                    new Rectangle(left + TextIndent, textTop + titleHeight, columnWidth - TextIndent, valueHeight + 2),
+                    BodyTextColor,
+                    centerVertically: false,
+                    centerHorizontally: false);
+            }
         }
     }
 
@@ -3431,7 +3670,10 @@ public sealed partial class Form1 : Form
         if (_showingMeaning)
         {
             _flashcardPinyin.Text = word.Pinyin;
-            _flashcardDetails.Text = FormatFlashcardDetails(word);
+            var (leftRows, rightRows) = BuildFlashcardDetailRows(word);
+            var highlightKeys = GetHighlightKeys(word.Chinese);
+            _flashcardDetailsLeft.SetContent(leftRows, highlightKeys);
+            _flashcardDetailsRight.SetContent(rightRows, highlightKeys);
             _flashcardFace.Visible = false;
             _flashcardBackLayout.Visible = true;
             CenterFlashcardMeaningContent();
@@ -3521,28 +3763,51 @@ public sealed partial class Form1 : Form
 
         var maximumTextWidth = Math.Max(100, _flashcardBackLayout.ClientSize.Width - 32);
         var maximumTextSize = new Size(maximumTextWidth, 0);
-        _flashcardDetails.MaximumSize = maximumTextSize;
         _flashcardPinyin.MaximumSize = maximumTextSize;
-        var textFlags = TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl;
-        var pinyinSize = TextRenderer.MeasureText(
+        // Pinyin sits in a centred pill sized to its text.
+        var pinyinText = TextRenderer.MeasureText(
             string.IsNullOrEmpty(_flashcardPinyin.Text) ? " " : _flashcardPinyin.Text,
-            _flashcardPinyin.Font,
-            new Size(maximumTextWidth, 10_000),
-            textFlags);
-        var detailsSize = TextRenderer.MeasureText(
-            string.IsNullOrEmpty(_flashcardDetails.Text) ? " " : _flashcardDetails.Text,
-            _flashcardDetails.Font,
-            new Size(maximumTextWidth, 10_000),
-            textFlags);
-        var gap = 4;
-        var totalHeight = pinyinSize.Height + gap + detailsSize.Height;
-        var top = Math.Max(0, (_flashcardBackLayout.ClientSize.Height - totalHeight) / 2);
-        _flashcardPinyin.Bounds = new Rectangle(16, top, maximumTextWidth, pinyinSize.Height);
-        _flashcardDetails.Bounds = new Rectangle(
-            16,
-            top + pinyinSize.Height + gap,
-            maximumTextWidth,
-            detailsSize.Height);
+            _flashcardPinyin.Font);
+        var pinyinSize = new Size(Math.Min(maximumTextWidth, pinyinText.Width + 64), pinyinText.Height + 14);
+        var width = _flashcardBackLayout.ClientSize.Width;
+        var height = _flashcardBackLayout.ClientSize.Height;
+        const int sidePadding = 24;
+        const int gap = 28;
+        var sideWidth = (width - pinyinSize.Width) / 2 - sidePadding - gap;
+        if (sideWidth >= 220)
+        {
+            // Wide card: Vietnamese | pinyin | Chinese & English, each centred vertically.
+            var leftHeight = _flashcardDetailsLeft.GetContentHeight(sideWidth);
+            var rightHeight = _flashcardDetailsRight.GetContentHeight(sideWidth);
+            _flashcardPinyin.Bounds = new Rectangle(
+                (width - pinyinSize.Width) / 2,
+                (height - pinyinSize.Height) / 2,
+                pinyinSize.Width,
+                pinyinSize.Height);
+            _flashcardDetailsLeft.Bounds = new Rectangle(
+                sidePadding,
+                Math.Max(0, (height - leftHeight) / 2),
+                sideWidth,
+                Math.Min(height, leftHeight));
+            _flashcardDetailsRight.Bounds = new Rectangle(
+                width - sidePadding - sideWidth,
+                Math.Max(0, (height - rightHeight) / 2),
+                sideWidth,
+                Math.Min(height, rightHeight));
+            return;
+        }
+
+        // Narrow card: pinyin on top, then the Vietnamese and the English blocks.
+        var stackWidth = maximumTextWidth;
+        var leftStack = _flashcardDetailsLeft.GetContentHeight(stackWidth);
+        var rightStack = _flashcardDetailsRight.GetContentHeight(stackWidth);
+        var totalHeight = pinyinSize.Height + 14 + leftStack + 10 + rightStack;
+        var top = Math.Max(0, (height - totalHeight) / 2);
+        _flashcardPinyin.Bounds = new Rectangle((width - pinyinSize.Width) / 2, top, pinyinSize.Width, pinyinSize.Height);
+        top += pinyinSize.Height + 14;
+        _flashcardDetailsLeft.Bounds = new Rectangle(16, top, stackWidth, leftStack);
+        top += leftStack + 10;
+        _flashcardDetailsRight.Bounds = new Rectangle(16, top, stackWidth, rightStack);
     }
 
     private void MoveFlashcard(int offset)
@@ -4072,39 +4337,27 @@ public sealed partial class Form1 : Form
     private static string FormatEnglishMeaning(string english) =>
         string.IsNullOrWhiteSpace(english) ? "(chưa có)" : english;
 
-    private static string FormatFlashcardDetails(VocabularyWord word)
+    // Left side: the Vietnamese details; right side: the Chinese example and English.
+    private static (List<FlashcardDetailRow> Left, List<FlashcardDetailRow> Right) BuildFlashcardDetailRows(VocabularyWord word)
     {
-        var details = new List<string>
+        var left = new List<FlashcardDetailRow>();
+        var right = new List<FlashcardDetailRow>();
+        void Add(List<FlashcardDetailRow> side, string icon, Color badge, Color iconColor, string title, string value)
         {
-            $"Tiếng Việt: {word.Vietnamese}",
-            $"Tiếng Anh: {FormatEnglishMeaning(word.English)}"
-        };
-        if (!string.IsNullOrWhiteSpace(word.EnglishExample))
-        {
-            details.Add($"Ví dụ tiếng Anh: {word.EnglishExample}");
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                side.Add(new FlashcardDetailRow(icon, badge, iconColor, title, value));
+            }
         }
 
-        if (!string.IsNullOrWhiteSpace(word.ChineseExample))
-        {
-            details.Add($"Ví dụ tiếng Trung: {word.ChineseExample}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(word.VietnameseExample))
-        {
-            details.Add($"Ví dụ tiếng Việt: {word.VietnameseExample}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(word.EnglishGrammar))
-        {
-            details.Add($"Ngữ pháp: {word.EnglishGrammar}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(word.VietnameseGrammar))
-        {
-            details.Add($"Ngữ pháp tiếng Việt: {word.VietnameseGrammar}");
-        }
-
-        return string.Join(Environment.NewLine, details);
+        Add(left, "🌸", Color.FromArgb(252, 231, 243), Color.FromArgb(219, 39, 119), "Nghĩa tiếng Việt", word.Vietnamese);
+        Add(left, "🍀", Color.FromArgb(220, 252, 231), Color.FromArgb(22, 163, 74), "Ví dụ tiếng Việt", word.VietnameseExample);
+        Add(left, "💡", Color.FromArgb(254, 249, 195), Color.FromArgb(202, 138, 4), "Ngữ pháp tiếng Việt", word.VietnameseGrammar);
+        Add(right, "🏮", Color.FromArgb(254, 226, 226), Color.FromArgb(220, 38, 38), "Ví dụ tiếng Trung", word.ChineseExample);
+        Add(right, "🌍", Color.FromArgb(219, 234, 254), Color.FromArgb(37, 99, 235), "Nghĩa tiếng Anh", FormatEnglishMeaning(word.English));
+        Add(right, "✏", Color.FromArgb(254, 243, 199), Color.FromArgb(217, 119, 6), "Ví dụ tiếng Anh", word.EnglishExample);
+        Add(right, "🧩", Color.FromArgb(237, 233, 254), Color.FromArgb(124, 58, 237), "Ngữ pháp", word.EnglishGrammar);
+        return (left, right);
     }
 
     private void PracticeTab_SelectedIndexChanged(object? sender, EventArgs e)
