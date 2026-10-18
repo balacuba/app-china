@@ -153,6 +153,7 @@ public sealed partial class Form1 : Form
     private readonly NinjaGame _ninjaGame = new();
     private readonly List<Control> _practiceModeControls = [];
     private bool _ninjaMode;
+    private TableLayoutPanel? _practiceLayout;
     private Action<int>? _selectPracticeMode;
     private long _advanceAt;
     private long _pausedAdvanceRemaining;
@@ -1714,6 +1715,18 @@ public sealed partial class Form1 : Form
         _ninjaMode = on;
         _practiceModeControls.ForEach(control => control.Visible = !on);
         _ninjaGame.Visible = on;
+
+        // The game gets as much room as it can: no title line, a thin margin, and
+        // only the mode buttons above it.
+        if (_practiceLayout is not null && _practiceTitle is not null)
+        {
+            _practiceLayout.SuspendLayout();
+            _practiceLayout.Padding = new Padding(on ? 10 : 32);
+            _practiceLayout.RowStyles[0].Height = on ? 50 : 104;
+            _practiceTitle.Visible = !on;
+            _practiceLayout.ResumeLayout();
+        }
+
         _ninjaGame.Stop();
         UpdatePracticeTitle();
         if (on)
@@ -2266,6 +2279,7 @@ public sealed partial class Form1 : Form
         var title = CreateTitle("Nhìn nghĩa tiếng Việt và tiếng Anh, gõ từ tiếng Trung");
         title.Dock = DockStyle.Fill;
         _practiceTitle = title;
+        _practiceLayout = layout;
         _practiceMeaning.Dock = DockStyle.Fill;
         _practiceMeaning.Font = new Font("Segoe UI", 24F, FontStyle.Bold);
         _practiceMeaning.ForeColor = Accent;

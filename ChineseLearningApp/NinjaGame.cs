@@ -22,7 +22,7 @@ internal enum NinjaGameMode
 // characters; when only characters are shown, their pinyin (no tones) counts too.
 internal sealed class NinjaGame : Panel
 {
-    private const int InputHeight = 92;
+    private const int InputHeight = 76;
     private const int MaxLives = 3;
     private const int HitsPerLevel = 8;
     private const float RoofHeight = 26;
@@ -35,6 +35,7 @@ internal sealed class NinjaGame : Panel
         Color.FromArgb(134, 239, 172), Color.FromArgb(196, 181, 253), Color.FromArgb(253, 186, 116)
     ];
 
+    private static readonly Color TypedColor = Color.FromArgb(248, 56, 56);
     private static readonly Font HanziFont = new("Microsoft YaHei UI", 22F, FontStyle.Bold);
     private static readonly Font PinyinUnderFont = new("Segoe UI", 11F);
     private static readonly Font PinyinOnlyFont = new("Segoe UI Semibold", 17F);
@@ -56,6 +57,8 @@ internal sealed class NinjaGame : Panel
     private readonly List<FallingWord> _words = [];
     private readonly List<Particle> _particles = [];
     private readonly List<FloatingText> _floats = [];
+    private readonly List<Explosion> _explosions = [];
+    private readonly List<Crater> _craters = [];
     private readonly List<PointF> _stars = [];
     private readonly List<Snowflake> _snow = [];
     private readonly TextBox _input = new();
@@ -66,6 +69,7 @@ internal sealed class NinjaGame : Panel
     private double _spawnIn;
     private double _flash;
     private double _twinkle;
+    private double _shake;
 
     // 0 = pale crescent, 1 = full blood moon; eases towards the lives left.
     private double _bloodMoon;
@@ -227,7 +231,7 @@ internal sealed class NinjaGame : Panel
     protected override void OnResize(EventArgs eventargs)
     {
         base.OnResize(eventargs);
-        _inputFrame.Location = new Point((Width - _inputFrame.Width) / 2, Height - InputHeight + 18);
+        _inputFrame.Location = new Point((Width - _inputFrame.Width) / 2, Height - InputHeight + 14);
         var centreY = (int)(Sky.Height / 2);
         var modesWidth = _modeButtons.Sum(button => button.Width) + 12 * (_modeButtons.Length - 1);
         var left = (Width - modesWidth) / 2;
@@ -263,6 +267,9 @@ internal sealed class NinjaGame : Panel
     {
         _words.Clear();
         _particles.Clear();
+        _explosions.Clear();
+        _craters.Clear();
+        _shake = 0;
         _floats.Clear();
         _targets.Clear();
         _shurikens.Clear();
@@ -322,6 +329,9 @@ internal sealed class NinjaGame : Panel
         _clock.Stop();
         _words.Clear();
         _particles.Clear();
+        _explosions.Clear();
+        _craters.Clear();
+        _shake = 0;
         _floats.Clear();
         _targets.Clear();
         _shurikens.Clear();
@@ -346,7 +356,7 @@ internal sealed class NinjaGame : Panel
         if (_spawnIn <= 0 && _words.Count < maxOnScreen && PickWord() is { } word)
         {
             var size = MeasureWord(word);
-            var x = 20 + (float)_random.NextDouble() * Math.Max(1, sky.Width - size.Width - 40);
+            var x = PickSpawnX(size, sky);
             _words.Add(new FallingWord(word, x, -size.Height - 4, size, TextColors[_random.Next(TextColors.Length)]));
             _spawnIn = Math.Max(0.8, 2.4 - Level * 0.22) / SpeedFactor;
         }
@@ -365,8 +375,15 @@ internal sealed class NinjaGame : Panel
             falling.Y += (float)(speed * dt);
             if (falling.Y + falling.Size.Height >= roofTop)
             {
-                // Landed on the roof: lose a life and the combo.
+                // Landed on the roof: it blows up and leaves a crater; lose a life and the combo.
                 _words.RemoveAt(index);
+                Explode(falling.CentreX, roofTop, MeteorRadius(falling) * 1.8f, ground: true);
+                _craters.Add(new Crater(falling.CentreX));
+                if (_craters.Count > 10)
+                {
+                    _craters.RemoveAt(0);
+                }
+
                 _lives--;
                 _combo = 0;
                 _flash = 0.35;
@@ -390,6 +407,18 @@ internal sealed class NinjaGame : Panel
         }
 
         _particles.RemoveAll(particle => particle.Life <= 0);
+        foreach (var blast in _explosions)
+        {
+            blast.Age += dt;
+        }
+
+        _explosions.RemoveAll(blast => blast.Age >= Explosion.Duration);
+        foreach (var crater in _craters)
+        {
+            crater.Age += dt;
+        }
+
+        _shake = Math.Max(0, _shake - dt);
         foreach (var text in _floats)
         {
             text.Y -= 40 * (float)dt;
@@ -487,6 +516,28 @@ internal sealed class NinjaGame : Panel
         };
     }
 
+    // Words all fall at one speed, so a new meteor only collides with ones still
+    // near the top: of a few random spots, take the one farthest from those.
+    private float PickSpawnX(SizeF size, RectangleF sky)
+    {
+        var range = Math.Max(1, sky.Width - size.Width - 140);
+        var nearTop = _words.Where(falling => falling.Y < 280).Select(falling => falling.CentreX).ToList();
+        var best = 70 + (float)_random.NextDouble() * range;
+        var bestGap = -1f;
+        for (var attempt = 0; attempt < 10 && nearTop.Count > 0; attempt++)
+        {
+            var x = 70 + (float)_random.NextDouble() * range;
+            var gap = nearTop.Min(centre => Math.Abs(centre - (x + size.Width / 2)));
+            if (gap > bestGap)
+            {
+                best = x;
+                bestGap = gap;
+            }
+        }
+
+        return best;
+    }
+
     // A word not already on screen, picked at random.
     private GameWord? PickWord()
     {
@@ -570,7 +621,8 @@ internal sealed class NinjaGame : Panel
         var points = 10 * _combo;
         _score += points;
         var centre = new PointF(target.CentreX, target.CentreY);
-        for (var index = 0; index < 22; index++)
+        Explode(centre.X, centre.Y, MeteorRadius(target) * 1.6f, ground: false);
+        for (var index = 0; index < 12; index++)
         {
             var angle = _random.NextDouble() * Math.PI * 2;
             var power = 80 + _random.NextDouble() * 180;
@@ -756,6 +808,19 @@ internal sealed class NinjaGame : Panel
                 }
             }
 
+            // A landing shakes the whole scene for a moment.
+            if (_shake > 0)
+            {
+                var amount = (float)(_shake * 22);
+                graphics.TranslateTransform(((float)_random.NextDouble() - 0.5f) * amount, ((float)_random.NextDouble() - 0.5f) * amount);
+            }
+
+            // Every meteor first, so no flame burns over another word.
+            foreach (var falling in _words)
+            {
+                DrawMeteor(graphics, falling);
+            }
+
             foreach (var falling in _words)
             {
                 DrawWord(graphics, falling);
@@ -768,6 +833,10 @@ internal sealed class NinjaGame : Panel
 
             DrawRoof(graphics, sky);
             DrawNinja(graphics, _ninjaX, sky.Bottom - RoofHeight + 4);
+            foreach (var blast in _explosions)
+            {
+                DrawExplosion(graphics, blast);
+            }
 
             foreach (var particle in _particles)
             {
@@ -796,6 +865,7 @@ internal sealed class NinjaGame : Panel
                 graphics.FillRectangle(red, sky);
             }
 
+            graphics.ResetTransform();
             if (!_running)
             {
                 using var veil = new SolidBrush(Color.FromArgb(150, 2, 6, 23));
@@ -820,32 +890,263 @@ internal sealed class NinjaGame : Panel
         var x = (int)falling.X;
         var y = (int)falling.Y;
         var width = (int)falling.Size.Width;
-        void Glow(string text, Font font, Rectangle box)
+        // The part typed so far turns red: leading characters, or the matching pinyin.
+        var typed = falling.Targeted ? string.Empty : _input.Text.Trim();
+        var hanziTyped = TypedHanziLength(falling.Word.Chinese, typed);
+        var pinyinTyped = TypedPinyinLength(falling.Word, typed, hanziTyped);
+        void Glow(string text, Font font, Rectangle box, int typedLength)
         {
-            var shadow = box;
-            shadow.Offset(0, 2);
-            TextRenderer.DrawText(graphics, text, font, shadow, Color.FromArgb(2, 6, 23), TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding);
-            TextRenderer.DrawText(graphics, text, font, box, color, TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding);
+            const TextFormatFlags flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding;
+            // A dark outline all round keeps the text readable on the fire.
+            foreach (var (dx, dy) in new[] { (-1, -1), (1, -1), (-1, 1), (1, 1), (0, 2), (2, 0), (-2, 0), (0, -2) })
+            {
+                var shadow = box;
+                shadow.Offset(dx, dy);
+                TextRenderer.DrawText(graphics, text, font, shadow, Color.FromArgb(28, 14, 8), flags);
+            }
+
+            TextRenderer.DrawText(graphics, text, font, box, color, flags);
+            if (typedLength > 0)
+            {
+                // Redraw the typed start in red, left-aligned where the centred text begins.
+                var full = TextRenderer.MeasureText(graphics, text, font, Size.Empty, TextFormatFlags.NoPadding).Width;
+                var start = new Rectangle(box.X + (box.Width - full) / 2, box.Y, box.Width, box.Height);
+                TextRenderer.DrawText(graphics, text[..typedLength], font, start, TypedColor, TextFormatFlags.NoPadding);
+            }
         }
 
         switch (Mode)
         {
             case NinjaGameMode.Hanzi:
-                Glow(falling.Word.Chinese, HanziFont, new Rectangle(x, y, width, (int)falling.Size.Height));
+                Glow(falling.Word.Chinese, HanziFont, new Rectangle(x, y, width, (int)falling.Size.Height), hanziTyped);
                 break;
             case NinjaGameMode.HanziPinyin:
                 var hanziHeight = TextRenderer.MeasureText(falling.Word.Chinese, HanziFont).Height;
-                Glow(falling.Word.Chinese, HanziFont, new Rectangle(x, y, width, hanziHeight));
-                Glow(falling.Word.Pinyin, PinyinUnderFont, new Rectangle(x, y + hanziHeight, width, (int)falling.Size.Height - hanziHeight));
+                Glow(falling.Word.Chinese, HanziFont, new Rectangle(x, y, width, hanziHeight), hanziTyped);
+                Glow(falling.Word.Pinyin, PinyinUnderFont, new Rectangle(x, y + hanziHeight, width, (int)falling.Size.Height - hanziHeight), pinyinTyped);
                 break;
             default:
-                Glow(falling.Word.Pinyin, PinyinOnlyFont, new Rectangle(x, y, width, (int)falling.Size.Height));
+                Glow(falling.Word.Pinyin, PinyinOnlyFont, new Rectangle(x, y, width, (int)falling.Size.Height), pinyinTyped);
                 break;
         }
     }
 
+    // A burning meteor: the word sits inside a ball of fire that trails up behind it,
+    // shedding loose tongues of flame, with two or three small fireballs alongside.
+    // A word already answered hangs still and stops burning.
+    private void DrawMeteor(Graphics graphics, FallingWord falling)
+    {
+        var centreX = falling.CentreX;
+        var centreY = falling.CentreY;
+        var radius = MeteorRadius(falling);
+        var seed = falling.X * 0.37f;
+        var time = (float)_twinkle;
+        if (!falling.Targeted)
+        {
+            // Companions trail a little behind and to the sides, bobbing as they fly.
+            var companions = 2 + (int)(seed * 10) % 2;
+            for (var index = 0; index < companions; index++)
+            {
+                var side = index % 2 == 0 ? -1 : 1;
+                var size = 5 + (seed * 7 + index * 3) % 4;
+                var x = centreX + side * (radius + 16 + index * 9) + MathF.Sin(time * 2.2f + seed + index) * 4;
+                var y = centreY - radius * 0.5f - 14 - index * 20 + MathF.Cos(time * 1.7f + seed + index) * 3;
+                DrawFireball(graphics, x, y, size, size * 9, seed + index, time);
+            }
+
+            // Loose tongues of fire peel off the sides and drift up, fading out.
+            var length = 110 + radius * 3f;
+            for (var index = 0; index < 5; index++)
+            {
+                var t = (time * 0.7f + index / 5f + seed) % 1f;
+                var side = index % 2 == 0 ? -1 : 1;
+                var tongueX = centreX + side * radius * (0.75f + 0.5f * t) + MathF.Sin(time * 4 + index) * 3;
+                var tongueY = centreY - radius * 1.1f - t * length * 0.8f;
+                // Orange only: faint yellow over the night sky turns a muddy green.
+                var color = index % 2 == 0 ? Color.FromArgb(251, 146, 60) : Color.FromArgb(249, 115, 22);
+                DrawFlame(graphics, tongueX, tongueY, radius * 1.3f, radius * 0.16f, seed + index * 3, time, color, (int)(240 * (1 - t) * (1 - t)));
+            }
+
+            DrawFireball(graphics, centreX, centreY, radius, length, seed, time);
+        }
+    }
+
+    // The fire around a meteor, in cartoon layers: a big orange flame, a yellow one
+    // inside it, and a pale hot core right around the word.
+    private static void DrawFireball(Graphics graphics, float centreX, float centreY, float radius, float length, float seed, float time)
+    {
+        DrawFlame(graphics, centreX, centreY, length, radius * 1.3f, seed, time, Color.FromArgb(249, 115, 22), 245);
+        DrawFlame(graphics, centreX, centreY, length * 0.72f, radius * 1.1f, seed + 2, time, Color.FromArgb(251, 191, 36), 255);
+        DrawFlame(graphics, centreX, centreY, length * 0.4f, radius * 0.92f, seed + 4, time, Color.FromArgb(254, 240, 138), 255);
+    }
+
+    // Big enough for the fire to hold the whole word.
+    private static float MeteorRadius(FallingWord falling) =>
+        Math.Max(falling.Size.Width, falling.Size.Height) / 2 + 8;
+
+    // A blast: debris and fire flung out, plus the expanding fireball and shockwave.
+    // On the ground it also throws up debris and shakes the screen.
+    private void Explode(float x, float y, float size, bool ground)
+    {
+        _explosions.Add(new Explosion(x, y, size, ground));
+        Color[] fire = [Color.FromArgb(253, 224, 71), Color.FromArgb(251, 146, 60), Color.FromArgb(239, 68, 68)];
+        for (var index = 0; index < (ground ? 34 : 26); index++)
+        {
+            var angle = ground ? Math.PI + _random.NextDouble() * Math.PI : _random.NextDouble() * Math.PI * 2;
+            var power = 120 + _random.NextDouble() * 260;
+            var color = ground && index % 3 == 0 ? Color.FromArgb(87, 60, 46) : fire[_random.Next(fire.Length)];
+            _particles.Add(new Particle(x, y, (float)(Math.Cos(angle) * power), (float)(Math.Sin(angle) * power - 40), color));
+        }
+
+        if (ground)
+        {
+            _shake = 0.4;
+        }
+    }
+
+    private void DrawExplosion(Graphics graphics, Explosion blast)
+    {
+        var t = (float)(blast.Age / Explosion.Duration);
+        var grow = 1 - (1 - t) * (1 - t);
+        var radius = blast.Size * (0.35f + 0.65f * grow);
+        var fade = 1 - t;
+
+        var ring = blast.Size * (0.4f + 1.1f * grow);
+        using (var wave = new Pen(Color.FromArgb((int)(200 * fade), 254, 215, 170), 5 * fade + 1))
+        {
+            graphics.DrawEllipse(wave, blast.X - ring, blast.Y - ring * (blast.Ground ? 0.45f : 1), ring * 2, ring * (blast.Ground ? 0.9f : 2));
+        }
+
+        // Fireball: red glow outside, then orange, yellow and a white-hot core that
+        // burns out first.
+        FireDisc(graphics, blast.X, blast.Y, radius, Color.FromArgb((int)(190 * fade), 239, 68, 68));
+        FireDisc(graphics, blast.X, blast.Y, radius * 0.72f, Color.FromArgb((int)(230 * fade), 249, 115, 22));
+        FireDisc(graphics, blast.X, blast.Y, radius * 0.45f, Color.FromArgb((int)(255 * fade), 253, 224, 71));
+        FireDisc(graphics, blast.X, blast.Y, radius * 0.25f, Color.FromArgb((int)(255 * fade * fade), 255, 255, 240));
+    }
+
+    // A soft disc: solid in the middle, fading to nothing at its edge.
+    private static void FireDisc(Graphics graphics, float x, float y, float radius, Color color)
+    {
+        if (color.A == 0 || radius < 1)
+        {
+            return;
+        }
+
+        var bounds = new RectangleF(x - radius, y - radius, radius * 2, radius * 2);
+        using var path = new GraphicsPath();
+        path.AddEllipse(bounds);
+        using var brush = new PathGradientBrush(path)
+        {
+            CenterColor = color,
+            SurroundColors = [Color.FromArgb(0, color)],
+            FocusScales = new PointF(0.45f, 0.45f)
+        };
+        graphics.FillEllipse(brush, bounds);
+    }
+
+    // One flame layer: a teardrop whose round bottom wraps under the word and whose
+    // sides taper up to a tip, rippling with time so the fire licks and flickers.
+    // Solid around the word, fading out towards the tip.
+    private static void DrawFlame(Graphics graphics, float centreX, float head, float length, float half, float seed, float time, Color color, int alpha)
+    {
+        const int steps = 16;
+        var left = new PointF[steps + 1];
+        var right = new PointF[steps + 1];
+        for (var step = 0; step <= steps; step++)
+        {
+            var t = step / (float)steps;
+            var ripple = 1 + 0.2f * MathF.Sqrt(t) * MathF.Sin(t * 10 - time * 11 + seed);
+            var width = half * MathF.Pow(1 - t, 0.8f) * ripple;
+            var sway = MathF.Sin(t * 5 - time * 7 + seed) * half * 0.3f * t;
+            var y = head - t * length;
+            left[step] = new PointF(centreX + sway - width, y);
+            right[step] = new PointF(centreX + sway + width, y);
+        }
+
+        using var flame = new GraphicsPath();
+        flame.AddCurve(left);
+        flame.AddCurve(right.Reverse().ToArray());
+        flame.AddArc(centreX - half, head - half, half * 2, half * 2, 0, 180);
+        flame.CloseFigure();
+
+        var total = length + half;
+        var bounds = new RectangleF(centreX - half * 2, head - length - 1, half * 4, total + 2);
+        using var fade = new LinearGradientBrush(bounds, color, color, LinearGradientMode.Vertical)
+        {
+            InterpolationColors = new ColorBlend
+            {
+                Colors = [Color.FromArgb(0, color), Color.FromArgb(alpha * 3 / 4, color), Color.FromArgb(alpha, color), Color.FromArgb(alpha, color)],
+                Positions = [0f, 0.4f * length / total, length / total, 1f]
+            }
+        };
+        graphics.FillPath(fade, flame);
+    }
+
+    // How many leading characters of the word the typed text matches.
+    private static int TypedHanziLength(string chinese, string typed) =>
+        typed.Length > 0 && chinese.StartsWith(typed, StringComparison.Ordinal) ? typed.Length : 0;
+
+    // How much of the pinyin to colour: the syllables of the characters typed so far,
+    // or, when pinyin is typed, the letters it matches (tones and spaces ignored).
+    private static int TypedPinyinLength(GameWord word, string typed, int hanziTyped)
+    {
+        if (hanziTyped > 0)
+        {
+            var syllables = word.Pinyin.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (syllables.Length != word.Chinese.Length)
+            {
+                return hanziTyped == word.Chinese.Length ? word.Pinyin.Length : 0;
+            }
+
+            var end = 0;
+            for (var index = 0; index < hanziTyped; index++)
+            {
+                end = word.Pinyin.IndexOf(syllables[index], end, StringComparison.Ordinal) + syllables[index].Length;
+            }
+
+            return end;
+        }
+
+        var letters = typed.Where(char.IsLetter).Select(BaseLetter).ToArray();
+        if (letters.Length == 0)
+        {
+            return 0;
+        }
+
+        var matched = 0;
+        for (var position = 0; position < word.Pinyin.Length; position++)
+        {
+            var letter = word.Pinyin[position];
+            if (!char.IsLetter(letter))
+            {
+                continue;
+            }
+
+            if (BaseLetter(letter) != letters[matched])
+            {
+                return 0;
+            }
+
+            if (++matched == letters.Length)
+            {
+                return position + 1;
+            }
+        }
+
+        return 0;
+    }
+
+    // A pinyin letter without its tone mark, lower case; v stands for ü.
+    private static char BaseLetter(char letter)
+    {
+        var plain = letter.ToString().Normalize(System.Text.NormalizationForm.FormD)[0];
+        plain = char.ToLowerInvariant(plain);
+        return plain == 'v' ? 'u' : plain;
+    }
+
     // A dark tiled roof along the bottom of the sky; a word that lands here is lost.
-    private static void DrawRoof(Graphics graphics, RectangleF sky)
+    private void DrawRoof(Graphics graphics, RectangleF sky)
     {
         var top = sky.Bottom - RoofHeight;
         using (var roof = new LinearGradientBrush(new RectangleF(0, top - 1, sky.Width, RoofHeight + 2),
@@ -859,6 +1160,39 @@ internal sealed class NinjaGame : Panel
         for (var x = 0f; x < sky.Width; x += 28)
         {
             graphics.DrawArc(tile, x, top + 4, 28, 16, 0, 180);
+        }
+
+        // Craters where meteors struck: a dark bowl sunk into the roof with rubble
+        // on its lips, glowing hot for a few seconds after the impact.
+        foreach (var crater in _craters)
+        {
+            var bowl = new RectangleF(crater.X - 34, top - 8, 68, 24);
+            var state = graphics.Save();
+            graphics.SetClip(new RectangleF(bowl.X - 2, top, bowl.Width + 4, RoofHeight));
+            using (var path = new GraphicsPath())
+            {
+                path.AddEllipse(bowl);
+                using var dark = new PathGradientBrush(path)
+                {
+                    CenterPoint = new PointF(crater.X, top + 6),
+                    CenterColor = Color.FromArgb(10, 8, 8),
+                    SurroundColors = [Color.FromArgb(51, 41, 46)]
+                };
+                graphics.FillEllipse(dark, bowl);
+            }
+
+            var heat = Math.Clamp(1 - crater.Age / 3, 0, 1);
+            if (heat > 0)
+            {
+                using var embers = new SolidBrush(Color.FromArgb((int)(200 * heat), 249, 115, 22));
+                graphics.FillEllipse(embers, crater.X - 18, top + 1, 36, 9);
+            }
+
+            graphics.Restore(state);
+            using var rubble = new SolidBrush(Color.FromArgb(71, 85, 105));
+            graphics.FillEllipse(rubble, crater.X - 44, top - 4, 16, 8);
+            graphics.FillEllipse(rubble, crater.X + 28, top - 3, 15, 7);
+            graphics.FillEllipse(rubble, crater.X - 30, top - 6, 7, 5);
         }
     }
 
@@ -1093,6 +1427,22 @@ internal sealed class NinjaGame : Panel
         (int)(from.R + (to.R - from.R) * amount),
         (int)(from.G + (to.G - from.G) * amount),
         (int)(from.B + (to.B - from.B) * amount));
+
+    private sealed class Explosion(float x, float y, float size, bool ground)
+    {
+        public const double Duration = 0.6;
+        public float X { get; } = x;
+        public float Y { get; } = y;
+        public float Size { get; } = size;
+        public bool Ground { get; } = ground;
+        public double Age { get; set; }
+    }
+
+    private sealed class Crater(float x)
+    {
+        public float X { get; } = x;
+        public double Age { get; set; }
+    }
 
     private sealed class Snowflake(float x, float y, float size, float phase)
     {
