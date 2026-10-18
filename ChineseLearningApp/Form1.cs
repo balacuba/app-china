@@ -639,7 +639,6 @@ public sealed partial class Form1 : Form
         });
         manage.Controls.Add(CreateButton("Nhập CSV / TXT", ImportVocabulary));
         manage.Controls.Add(CreateButton("Thêm từ", AddWord));
-        manage.Controls.Add(CreateButton("Xóa từ đang chọn", DeleteWord, danger: true));
         manage.Controls.Add(CreateButton("Xóa toàn bộ", DeleteAllWords, danger: true));
         layout.Controls.Add(manage, 0, 0);
         layout.SetColumnSpan(manage, 2);
@@ -2180,24 +2179,6 @@ public sealed partial class Form1 : Form
         dialog.Controls.Add(label);
         dialog.Controls.Add(input);
         return input;
-    }
-
-    private void DeleteWord(object? sender, EventArgs e)
-    {
-        if (_grid.CurrentRow?.DataBoundItem is not VocabularyWord word)
-        {
-            MessageBox.Show(this, "Hãy chọn một từ trong danh sách.", "Chưa chọn từ",
-                MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return;
-        }
-
-        if (MessageBox.Show(this, $"Bạn có chắc muốn xóa “{word.Chinese}” không?", "Xác nhận xóa",
-            MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
-        {
-            return;
-        }
-
-        SaveAndReplace(_words.Where(item => item != word).ToList());
     }
 
     private void DeleteAllWords(object? sender, EventArgs e)
