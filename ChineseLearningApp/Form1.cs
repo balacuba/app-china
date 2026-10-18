@@ -87,7 +87,6 @@ public sealed partial class Form1 : Form
     private readonly List<int> _questionOrder = new();
     private readonly DataGridView _grid = new();
     private readonly TextBox _searchBox = new();
-    private readonly Label _countLabel = new();
     private readonly Panel _flashcardHost = new();
     private readonly RoundedPanel _flashcardCard = new();
     private readonly RoundedPanel _answerFrame = new();
@@ -593,16 +592,15 @@ public sealed partial class Form1 : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 4,
             Padding = new Padding(20)
         };
-        // Import/add/delete live on the Settings page; this page is search + list.
+        // Import/add/delete live on the Settings page; this page is search,
+        // HSK filter and the list.
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
-        _countLabel.AutoSize = true;
-        _countLabel.ForeColor = MutedTextColor;
-        _countLabel.Margin = new Padding(8, 11, 0, 0);
 
         var searchRow = new FlowLayoutPanel
         {
@@ -633,7 +631,6 @@ public sealed partial class Form1 : Form
 
         searchRow.Controls.Add(selectAllButton);
         searchRow.Controls.Add(clearSelectionButton);
-        searchRow.Controls.Add(_countLabel);
 
         _grid.Dock = DockStyle.Fill;
         _grid.AllowUserToAddRows = false;
@@ -743,8 +740,9 @@ public sealed partial class Form1 : Form
         };
 
         layout.Controls.Add(searchRow, 0, 0);
-        layout.Controls.Add(CreateCard(_grid, Padding.Empty), 0, 1);
-        layout.Controls.Add(hint, 0, 2);
+        layout.Controls.Add(BuildHskFilterRow(), 0, 1);
+        layout.Controls.Add(CreateCard(_grid, Padding.Empty), 0, 2);
+        layout.Controls.Add(hint, 0, 3);
         page.Controls.Add(layout);
         return page;
     }
@@ -2710,12 +2708,122 @@ public sealed partial class Form1 : Form
                 _grid.DataSource = _visibleWords;
             }
 
-            UpdateVocabularyCount();
+            SyncHskFilterChecks();
+
         }
         finally
         {
             _visibleWords.RaiseListChangedEvents = true;
             _refreshingVocabulary = false;
+        }
+    }
+
+    // HSK quick filter: one tick box per level plus "Khác" for words with any
+    // other (or no) level. It edits the same filter as the "Cấp HSK" header menu.
+    private static readonly string[] HskFilterLevels = ["HSK 1", "HSK 2", "HSK 3", "HSK 4", "HSK 5", "HSK 6", "HSK 7-9"];
+    private readonly List<(RoundedCheckBox Box, string? Level, string Caption)> _hskFilterChecks = [];
+    private bool _syncingHskFilterChecks;
+
+    private FlowLayoutPanel BuildHskFilterRow()
+    {
+        var row = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Padding = Padding.Empty };
+        row.Controls.Add(new Label
+        {
+            AutoSize = true,
+            Text = "🎯 Lọc HSK:",
+            ForeColor = BodyTextColor,
+            Margin = new Padding(0, 11, 12, 0)
+        });
+        foreach (var (level, caption) in HskFilterLevels.Select(level => ((string?)level, level)).Append((null, "Khác")))
+        {
+            var box = new RoundedCheckBox
+            {
+                AutoSize = true,
+                Text = caption,
+                Font = new Font(UiFontName, 10.5F),
+                ForeColor = BodyTextColor,
+                BackColor = PageColor,
+                Margin = new Padding(0, 8, 18, 0)
+            };
+            box.CheckedChanged += (_, _) => ApplyHskFilterChecks();
+            _hskFilterChecks.Add((box, level, caption));
+            row.Controls.Add(box);
+        }
+
+        return row;
+    }
+
+    private void ApplyHskFilterChecks()
+    {
+        if (_syncingHskFilterChecks)
+        {
+            return;
+        }
+
+        var property = nameof(VocabularyWord.HskLevel);
+        var selected = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (box, level, _) in _hskFilterChecks.Where(item => item.Box.Checked))
+        {
+            if (level is not null)
+            {
+                selected.Add(level);
+            }
+            else
+            {
+                // "Khác": every level value that is not one of the standard ones.
+                selected.UnionWith(_words.Select(word => word.HskLevel).Where(value => !HskFilterLevels.Contains(value)));
+            }
+        }
+
+        // Nothing ticked means no HSK filter at all.
+        if (selected.Count == 0)
+        {
+            _columnFilters.Remove(property);
+        }
+        else
+        {
+            _columnFilters[property] = selected;
+        }
+
+        if (_grid.Columns[property] is { } column)
+        {
+            UpdateColumnFilterHeader(column);
+        }
+
+        RefreshVocabulary();
+        // A new set of words starts from its first row.
+        if (_grid.RowCount > 0)
+        {
+            _grid.FirstDisplayedScrollingRowIndex = 0;
+        }
+    }
+
+    // Mirrors the HSK filter (also set from the header menu) on the tick boxes,
+    // and shows how many words each level has.
+    private void SyncHskFilterChecks()
+    {
+        if (_hskFilterChecks.Count == 0)
+        {
+            return;
+        }
+
+        var counts = _words.GroupBy(word => HskFilterLevels.Contains(word.HskLevel) ? word.HskLevel : "")
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        _columnFilters.TryGetValue(nameof(VocabularyWord.HskLevel), out var filter);
+        _syncingHskFilterChecks = true;
+        try
+        {
+            foreach (var (box, level, caption) in _hskFilterChecks)
+            {
+                box.Text = $"{caption} ({counts.GetValueOrDefault(level ?? "")})";
+                box.Checked = filter is not null && (level is not null
+                    ? filter.Contains(level)
+                    : filter.Any(value => !HskFilterLevels.Contains(value)));
+            }
+        }
+        finally
+        {
+            _syncingHskFilterChecks = false;
         }
     }
 
@@ -2968,7 +3076,6 @@ public sealed partial class Form1 : Form
             return;
         }
 
-        UpdateVocabularyCount();
         if (IsHandleCreated && !IsDisposed)
         {
             BeginInvoke((Action)(() =>
@@ -2999,7 +3106,6 @@ public sealed partial class Form1 : Form
         }
 
         _visibleWords.ResetBindings();
-        UpdateVocabularyCount();
         RefreshStudyWords();
     }
 
@@ -3022,14 +3128,6 @@ public sealed partial class Form1 : Form
         _questionOrderPosition = 0;
         ShowFlashcard();
         ShowNextQuestion();
-    }
-
-    private void UpdateVocabularyCount()
-    {
-        var selectedCount = _words.Count(word => word.IsSelected);
-        _countLabel.Text = selectedCount == 0
-            ? $"Hiển thị: {_visibleWords.Count}/{_words.Count} | Chưa chọn từ học"
-            : $"Hiển thị: {_visibleWords.Count}/{_words.Count} | Đã chọn học: {selectedCount}";
     }
 
     private void VocabularyGrid_CellClick(object? sender, DataGridViewCellEventArgs e)
