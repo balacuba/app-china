@@ -411,35 +411,36 @@ public sealed partial class Form1 : Form
         tabs.BringToFront();
     }
 
-    // Accent-coloured app bar: the Home button, app name and a greeting.
+    // Accent-coloured app bar: the Home button on the left and the app logo and
+    // name centred.
     private Panel BuildHeaderBar(TabControl tabs)
     {
-        var header = new Panel { Dock = DockStyle.Top, Height = 60, BackColor = Accent, Padding = new Padding(20, 0, 20, 0) };
+        var header = new Panel { Dock = DockStyle.Top, Height = 64, BackColor = Accent, Padding = new Padding(20, 0, 20, 0) };
         var row = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, BackColor = Accent };
         // Equal side columns keep the app name centred in the bar.
         row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         row.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        var appName = new Label
+        var appName = new HeaderBrand
         {
             Anchor = AnchorStyles.None,
-            AutoSize = true,
-            Text = "汉语  Học tiếng Trung",
+            Text = "Học tiếng Trung",
             Font = new Font("Segoe UI Semibold", 15F),
-            ForeColor = Color.White,
             Margin = new Padding(24, 0, 24, 0)
         };
 
-        // White rounded button that returns to Home from any page.
+        // A lighter-blue pill that returns to Home from any page.
         var homeButton = new RoundedButton();
-        StyleButton(homeButton, ButtonKind.Secondary);
-        homeButton.BackColor = Color.White;
-        homeButton.FlatAppearance.MouseOverBackColor = AccentSoft;
-        homeButton.FlatAppearance.MouseDownBackColor = AccentSoftHover;
-        homeButton.FlatAppearance.BorderColor = Color.White;
+        StyleButton(homeButton, ButtonKind.Primary);
+        homeButton.BackColor = Color.FromArgb(59, 130, 246);
+        homeButton.ForeColor = Color.White;
+        homeButton.FlatAppearance.MouseOverBackColor = Color.FromArgb(96, 165, 250);
+        homeButton.FlatAppearance.MouseDownBackColor = Color.FromArgb(29, 78, 216);
+        homeButton.FlatAppearance.BorderColor = Color.FromArgb(147, 197, 253);
+        homeButton.Font = new Font("Segoe UI Semibold", 10.5F);
         homeButton.AutoSize = false;
-        homeButton.Size = new Size(230, 40);
+        homeButton.Size = new Size(190, 40);
         homeButton.Anchor = AnchorStyles.Left;
         homeButton.Margin = Padding.Empty;
         // The button goes straight back to Home (page 0); Home's cards open the other pages.
@@ -453,18 +454,8 @@ public sealed partial class Form1 : Form
         tabs.SelectedIndexChanged += (_, _) => SyncHomeButton();
         SyncHomeButton();
 
-        var greeting = new Label
-        {
-            Anchor = AnchorStyles.Right,
-            AutoSize = true,
-            Text = $"👋  Xin chào, {_userName}",
-            Font = new Font(UiFontName, 11F),
-            ForeColor = Color.FromArgb(219, 234, 254),
-            Margin = Padding.Empty
-        };
         row.Controls.Add(homeButton, 0, 0);
         row.Controls.Add(appName, 1, 0);
-        row.Controls.Add(greeting, 2, 0);
         header.Controls.Add(row);
         return header;
     }
@@ -3115,6 +3106,55 @@ public sealed partial class Form1 : Form
         }
 
         return (lines, lineHeight);
+    }
+
+    // App logo for the header: a white circle with "汉" in accent blue, then
+    // the app name (Text) in white.
+    private sealed class HeaderBrand : Control
+    {
+        private const int Logo = 38;
+        private const int Gap = 12;
+        private static readonly Font LogoFont = new("Microsoft YaHei UI", 15F, FontStyle.Bold);
+
+        public HeaderBrand()
+        {
+            SetStyle(
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw |
+                ControlStyles.UserPaint,
+                true);
+            BackColor = Accent;
+            ForeColor = Color.White;
+        }
+
+        public override Size GetPreferredSize(Size proposedSize) =>
+            new(Logo + Gap + TextRenderer.MeasureText(Text, Font).Width + 2, Logo + 4);
+
+        protected override void OnTextChanged(EventArgs e)
+        {
+            Size = GetPreferredSize(Size.Empty);
+            base.OnTextChanged(e);
+        }
+
+        protected override void OnFontChanged(EventArgs e)
+        {
+            Size = GetPreferredSize(Size.Empty);
+            base.OnFontChanged(e);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var graphics = e.Graphics;
+            graphics.Clear(BackColor);
+            graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            var circle = new Rectangle(0, (Height - Logo) / 2, Logo, Logo);
+            graphics.FillEllipse(Brushes.White, circle);
+            TextRenderer.DrawText(graphics, "汉", LogoFont, circle, Accent,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            TextRenderer.DrawText(graphics, Text, Font, new Rectangle(Logo + Gap, 0, Width - Logo - Gap, Height), ForeColor,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        }
     }
 
     // Header of a Settings card: a round pastel badge with an emoji, then the
