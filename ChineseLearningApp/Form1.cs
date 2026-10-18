@@ -298,9 +298,9 @@ public sealed partial class Form1 : Form
         var fixedWidth = _grid.Columns.Cast<DataGridViewColumn>()
             .Where(column => column.Visible && !columns.Contains(column))
             .Sum(column => column.Width);
-        // The vertical scrollbar is reserved up front: with thousands of rows it is
-        // nearly always shown, and it appears only after the widths are applied.
-        var available = _grid.ClientSize.Width - fixedWidth - SystemInformation.VerticalScrollBarWidth - 2;
+        // The grid has no scrollbars (it scrolls with the mouse wheel), so the
+        // columns can use the full width.
+        var available = _grid.ClientSize.Width - fixedWidth - 2;
         var baseTotal = columns.Sum(column => _baseColumnWidths[column.Name]);
         if (columns.Count == 0 || baseTotal <= 0)
         {
@@ -581,7 +581,9 @@ public sealed partial class Form1 : Form
         // Columns are squeezed to fit the view, so long text wraps and rows grow.
         _grid.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
         _grid.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.DisplayedCells;
-        _grid.ScrollBars = ScrollBars.Vertical;
+        // No scrollbar: the list scrolls freely with the mouse wheel instead.
+        _grid.ScrollBars = ScrollBars.None;
+        _grid.MouseWheel += VocabularyGrid_MouseWheel;
         _grid.ColumnHeadersDefaultCellStyle.WrapMode = DataGridViewTriState.True;
         _grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
 
@@ -2685,6 +2687,64 @@ public sealed partial class Form1 : Form
             Math.Max(1, e.CellBounds.Height - e.CellStyle.Padding.Vertical - 1));
         DrawHighlightedSegments(e.Graphics!, segments, e.CellStyle.Font ?? _grid.Font, bounds, normalColor, centerVertically: true);
         e.Handled = true;
+    }
+
+    // Without scrollbars the grid ignores the wheel, so scroll rows by hand
+    // (the system's lines-per-notch setting, at least one row per notch).
+    private void VocabularyGrid_MouseWheel(object? sender, MouseEventArgs e)
+    {
+        if (_grid.RowCount == 0 || _grid.IsCurrentCellInEditMode)
+        {
+            return;
+        }
+
+        var linesPerNotch = Math.Max(1, SystemInformation.MouseWheelScrollLines);
+        var rows = -e.Delta * linesPerNotch / 120;
+        if (rows == 0)
+        {
+            rows = -Math.Sign(e.Delta);
+        }
+
+        var first = Math.Max(0, _grid.FirstDisplayedScrollingRowIndex);
+        var target = Math.Clamp(first + rows, 0, GetLastFirstRow());
+        if (target != _grid.FirstDisplayedScrollingRowIndex)
+        {
+            _grid.FirstDisplayedScrollingRowIndex = target;
+        }
+
+        // Rows only get their real (wrapped) height when painted, so at the end of
+        // the list repaint and pull the view down until no blank space is left below.
+        for (var pass = 0; pass < 3 && rows > 0 && _grid.FirstDisplayedScrollingRowIndex + 60 >= _grid.RowCount; pass++)
+        {
+            _grid.Refresh();
+            var lastFirstRow = GetLastFirstRow();
+            if (lastFirstRow >= _grid.FirstDisplayedScrollingRowIndex)
+            {
+                break;
+            }
+
+            _grid.FirstDisplayedScrollingRowIndex = lastFirstRow;
+        }
+
+        if (e is HandledMouseEventArgs handled)
+        {
+            handled.Handled = true;
+        }
+    }
+
+    // The first row index at which the remaining rows exactly fill the view.
+    private int GetLastFirstRow()
+    {
+        var room = _grid.ClientSize.Height - _grid.ColumnHeadersHeight;
+        var first = _grid.RowCount;
+        var used = 0;
+        while (first > 0 && used + _grid.Rows[first - 1].Height <= room)
+        {
+            used += _grid.Rows[first - 1].Height;
+            first--;
+        }
+
+        return Math.Clamp(first, 0, Math.Max(0, _grid.RowCount - 1));
     }
 
     // The "Học" tick boxes are drawn as rounded squares: accent fill with a white
