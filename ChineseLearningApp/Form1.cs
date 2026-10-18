@@ -60,13 +60,6 @@ public sealed partial class Form1 : Form
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "ChineseLearningApp",
         "ninja-settings.json");
-    private static readonly (string Text, float Speed)[] NinjaSpeeds =
-    [
-        ("🐢 Chậm", 0.6f),
-        ("Vừa", 1f),
-        ("🐇 Nhanh", 1.4f),
-        ("⚡ Rất nhanh", 1.9f)
-    ];
     // The ticked "Học" words, kept apart from vocabulary.json so ticking a box
     // does not rewrite the whole word list.
     private readonly string _selectedWordsPath = Path.Combine(
@@ -1270,39 +1263,112 @@ public sealed partial class Form1 : Form
             Text = "Từ 1 đến 300 giây",
             Margin = new Padding(8, 11, 0, 0)
         });
-        // Ninja game: how fast the words fall, as four pills (the chosen one is filled).
+        // Ninja game: seconds a word takes to fall to the roof, typed straight into
+        // the box or nudged with − / +. Fewer seconds, faster words.
+        var fallBox = new TextBox
+        {
+            BorderStyle = BorderStyle.None,
+            BackColor = SurfaceColor,
+            ForeColor = Accent,
+            Font = new Font(UiFontName, 13F, FontStyle.Bold),
+            TextAlign = HorizontalAlignment.Right,
+            MaxLength = 2,
+            Width = 40,
+            Text = ((int)_ninjaGame.FallSeconds).ToString()
+        };
+        var fallUnit = new Label
+        {
+            AutoSize = true,
+            Text = "giây",
+            Font = new Font(UiFontName, 13F, FontStyle.Bold),
+            ForeColor = Accent,
+            BackColor = SurfaceColor
+        };
+        var fallFrame = new RoundedPanel
+        {
+            Size = new Size(130, 40),
+            Radius = 20,
+            FillColor = SurfaceColor,
+            OutlineColor = Accent,
+            OutlineWidth = 1.5F,
+            BackColor = SurfaceColor,
+            Margin = new Padding(0, 0, 10, 0)
+        };
+        fallFrame.Controls.AddRange([fallBox, fallUnit]);
+        fallFrame.Layout += (_, _) =>
+        {
+            var gap = 4;
+            var width = fallBox.Width + gap + fallUnit.PreferredWidth;
+            var left = (fallFrame.ClientSize.Width - width) / 2;
+            fallBox.Location = new Point(left, (fallFrame.ClientSize.Height - fallBox.PreferredHeight) / 2);
+            fallUnit.Location = new Point(left + fallBox.Width + gap, (fallFrame.ClientSize.Height - fallUnit.PreferredHeight) / 2);
+        };
+        fallFrame.Click += (_, _) => fallBox.Focus();
+
+        // Only digits go in; any number in range takes effect as it is typed, and
+        // leaving the box puts back the value in use if what was typed is not valid.
+        void ApplyFall(int seconds)
+        {
+            seconds = Math.Clamp(seconds, NinjaGame.MinFallSeconds, NinjaGame.MaxFallSeconds);
+            if (seconds != (int)_ninjaGame.FallSeconds)
+            {
+                SetNinjaFallSeconds(seconds);
+            }
+
+            if (fallBox.Text != seconds.ToString())
+            {
+                fallBox.Text = seconds.ToString();
+                fallBox.SelectionStart = fallBox.Text.Length;
+            }
+        }
+
+        fallBox.KeyPress += (_, e) => e.Handled = !char.IsControl(e.KeyChar) && !char.IsDigit(e.KeyChar);
+        fallBox.TextChanged += (_, _) =>
+        {
+            if (int.TryParse(fallBox.Text, out var seconds) &&
+                seconds >= NinjaGame.MinFallSeconds && seconds <= NinjaGame.MaxFallSeconds &&
+                seconds != (int)_ninjaGame.FallSeconds)
+            {
+                SetNinjaFallSeconds(seconds);
+            }
+        };
+        fallBox.Leave += (_, _) => ApplyFall(int.TryParse(fallBox.Text, out var seconds) ? seconds : (int)_ninjaGame.FallSeconds);
+        fallBox.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode == Keys.Enter)
+            {
+                ApplyFall(int.TryParse(fallBox.Text, out var seconds) ? seconds : (int)_ninjaGame.FallSeconds);
+                e.SuppressKeyPress = true;
+            }
+        };
+
+        Button FallStep(string text, int step)
+        {
+            var button = CreateButton(text, (_, _) => ApplyFall((int)_ninjaGame.FallSeconds + step), secondary: true);
+            button.AutoSize = false;
+            button.Size = new Size(44, 40);
+            button.Padding = Padding.Empty;
+            button.Font = new Font(UiFontName, 14F, FontStyle.Bold);
+            return button;
+        }
+
         var speedRow = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
             WrapContents = false,
             BackColor = SurfaceColor,
-            Padding = new Padding(0, 4, 0, 0)
+            Padding = new Padding(0, 6, 0, 0)
         };
-        var speedButtons = new List<(Button Button, float Speed)>();
-        void ShowSpeed()
+        speedRow.Controls.Add(FallStep("−", -1));
+        speedRow.Controls.Add(fallFrame);
+        speedRow.Controls.Add(FallStep("+", 1));
+        speedRow.Controls.Add(new Label
         {
-            foreach (var (button, speed) in speedButtons)
-            {
-                StyleButton(button, Math.Abs(speed - _ninjaGame.SpeedFactor) < 0.01f ? ButtonKind.Primary : ButtonKind.Secondary);
-            }
-        }
-
-        foreach (var (text, speed) in NinjaSpeeds)
-        {
-            var button = CreateButton(text, (_, _) =>
-            {
-                SetNinjaSpeed(speed);
-                ShowSpeed();
-            }, secondary: true);
-            button.AutoSize = false;
-            button.Size = new Size(text.Length > 6 ? 118 : 92, 36);
-            button.Margin = new Padding(0, 0, 8, 0);
-            ((RoundedButton)button).Radius = 18;
-            speedButtons.Add((button, speed));
-            speedRow.Controls.Add(button);
-        }
-
-        ShowSpeed();
+            AutoSize = true,
+            ForeColor = MutedTextColor,
+            Text = $"Từ {NinjaGame.MinFallSeconds} đến {NinjaGame.MaxFallSeconds} giây",
+            Margin = new Padding(8, 11, 0, 0)
+        });
         var practiceBody = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, BackColor = SurfaceColor };
         practiceBody.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
         practiceBody.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));
@@ -1319,7 +1385,7 @@ public sealed partial class Form1 : Form
         };
         practiceBody.Controls.Add(SubTitle("Thời gian mỗi câu"), 0, 0);
         practiceBody.Controls.Add(stepper, 0, 1);
-        practiceBody.Controls.Add(SubTitle("Tốc độ chữ rơi (Ninja phi tiêu)"), 0, 2);
+        practiceBody.Controls.Add(SubTitle("Thời gian chữ rơi xuống mái (Ninja phi tiêu), ít giây rơi nhanh hơn"), 0, 2);
         practiceBody.Controls.Add(speedRow, 0, 3);
         var practiceCard = CreateSettingsSection("⏱", Color.FromArgb(220, 252, 231), "Luyện gõ",
             "Thời gian mỗi câu và tốc độ chữ rơi của Ninja phi tiêu.", practiceBody);
@@ -1974,31 +2040,42 @@ public sealed partial class Form1 : Form
         }
     }
 
-    // A missing or unreadable file keeps the normal speed.
+    // Saved as { "FallSeconds": n }. An older file holds a bare speed factor
+    // (1 = normal), which becomes the matching number of seconds. A missing or
+    // unreadable file keeps the default.
     private void LoadNinjaSpeed()
     {
         try
         {
-            if (File.Exists(_ninjaSettingsPath) &&
-                JsonSerializer.Deserialize<float>(File.ReadAllText(_ninjaSettingsPath, Encoding.UTF8)) is var speed &&
-                NinjaSpeeds.Any(option => Math.Abs(option.Speed - speed) < 0.01f))
+            if (!File.Exists(_ninjaSettingsPath))
             {
-                _ninjaGame.SpeedFactor = speed;
+                return;
             }
+
+            using var json = JsonDocument.Parse(File.ReadAllText(_ninjaSettingsPath, Encoding.UTF8));
+            var seconds = json.RootElement.ValueKind switch
+            {
+                JsonValueKind.Number when json.RootElement.GetSingle() > 0 =>
+                    MathF.Round(NinjaGame.DefaultFallSeconds / json.RootElement.GetSingle()),
+                JsonValueKind.Object when json.RootElement.TryGetProperty("FallSeconds", out var value) &&
+                    value.ValueKind == JsonValueKind.Number => value.GetSingle(),
+                _ => NinjaGame.DefaultFallSeconds
+            };
+            _ninjaGame.FallSeconds = Math.Clamp(seconds, NinjaGame.MinFallSeconds, NinjaGame.MaxFallSeconds);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or FormatException)
         {
-            _ninjaGame.SpeedFactor = 1f;
+            _ninjaGame.FallSeconds = NinjaGame.DefaultFallSeconds;
         }
     }
 
-    private void SetNinjaSpeed(float speed)
+    private void SetNinjaFallSeconds(int seconds)
     {
-        _ninjaGame.SpeedFactor = speed;
+        _ninjaGame.FallSeconds = seconds;
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_ninjaSettingsPath)!);
-            File.WriteAllText(_ninjaSettingsPath, JsonSerializer.Serialize(speed), new UTF8Encoding(false));
+            File.WriteAllText(_ninjaSettingsPath, JsonSerializer.Serialize(new { FallSeconds = seconds }), new UTF8Encoding(false));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
