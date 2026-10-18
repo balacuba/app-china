@@ -3170,11 +3170,13 @@ public sealed partial class Form1 : Form
     {
         var button = CreateButton("🎯  Lọc HSK  ▾", (_, _) => { }, secondary: true);
         button.AutoSize = false;
-        button.Size = new Size(190, 40);
+        const int pillWidth = 190;
+        button.Size = new Size(pillWidth, 40);
         button.Margin = new Padding(0, 4, 12, 0);
         _hskFilterButton = button;
 
-        const int cardWidth = 250;
+        // The drop-down card is exactly as wide as the pill above it.
+        const int cardWidth = pillWidth;
         const int itemHeight = 36;
         var levels = HskFilterLevels.Select(level => ((string?)level, level)).Append((null, "Khác")).ToList();
         var cardHeight = 50 + levels.Count * itemHeight + 60;
@@ -3189,8 +3191,8 @@ public sealed partial class Form1 : Form
         card.Controls.Add(new Label
         {
             AutoSize = false,
-            Location = new Point(18, 14),
-            Size = new Size(cardWidth - 36, 24),
+            Location = new Point(14, 14),
+            Size = new Size(cardWidth - 28, 24),
             Text = "Lọc theo cấp HSK",
             Font = new Font("Segoe UI Semibold", 11F),
             ForeColor = TextColor,
@@ -3202,8 +3204,8 @@ public sealed partial class Form1 : Form
             var box = new RoundedCheckBox
             {
                 AutoSize = false,
-                Location = new Point(18, 48 + index * itemHeight),
-                Size = new Size(cardWidth - 36, itemHeight - 4),
+                Location = new Point(14, 48 + index * itemHeight),
+                Size = new Size(cardWidth - 28, itemHeight - 4),
                 Text = caption,
                 Font = new Font(UiFontName, 10.5F),
                 ForeColor = BodyTextColor,
@@ -3222,9 +3224,9 @@ public sealed partial class Form1 : Form
             ApplyHskFilterChecks();
         }, secondary: true);
         clear.AutoSize = false;
-        clear.Size = new Size(cardWidth - 36, 38);
+        clear.Size = new Size(cardWidth - 28, 38);
         clear.Margin = Padding.Empty;
-        clear.Location = new Point(18, cardHeight - 52);
+        clear.Location = new Point(14, cardHeight - 52);
         card.Controls.Add(clear);
 
         var dropDown = new ToolStripDropDown { AutoClose = false, Padding = Padding.Empty, DropShadowEnabled = true };
