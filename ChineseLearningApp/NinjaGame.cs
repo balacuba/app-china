@@ -845,14 +845,16 @@ internal sealed class NinjaGame : Panel
     private void DrawHud(Graphics graphics, RectangleF sky)
     {
         // Score and combo on the left, level in the middle, lives on the right.
+        // Each pill is as wide as its text, so large scores and combos fit.
         var pill = Color.FromArgb(60, 255, 255, 255);
-        DrawPill(graphics, new RectangleF(16, 14, 150, 34), "⭐", $"{_score} điểm", pill, Color.FromArgb(253, 224, 71));
+        var scoreWidth = DrawPill(graphics, 16, "⭐", $"{_score} điểm", pill, Color.FromArgb(253, 224, 71));
         if (_combo > 1)
         {
-            DrawPill(graphics, new RectangleF(176, 14, 120, 34), "🔥", $"Combo x{_combo}", pill, Color.FromArgb(253, 186, 116));
+            DrawPill(graphics, 16 + scoreWidth + 10, "🔥", $"Combo x{_combo}", pill, Color.FromArgb(253, 186, 116));
         }
 
-        DrawPill(graphics, new RectangleF(sky.Width / 2 - 55, 14, 110, 34), "⚔", $"Cấp {Level}", pill, Color.White);
+        var levelText = $"Cấp {Level}";
+        DrawPill(graphics, sky.Width / 2 - PillWidth(graphics, levelText) / 2, "⚔", levelText, pill, Color.White);
         const float heart = 24;
         for (var index = 0; index < MaxLives; index++)
         {
@@ -873,8 +875,16 @@ internal sealed class NinjaGame : Panel
         graphics.FillPath(brush, path);
     }
 
-    private static void DrawPill(Graphics graphics, RectangleF bounds, string icon, string text, Color fill, Color ink)
+    private const float PillHeight = 34;
+
+    // Icon space on the left, the text, and padding on the right.
+    private static float PillWidth(Graphics graphics, string text) =>
+        38 + TextRenderer.MeasureText(graphics, text, HudFont, Size.Empty, TextFormatFlags.NoPadding).Width + 16;
+
+    // Draws a rounded HUD pill at (x, 14) sized to its text; returns its width.
+    private static float DrawPill(Graphics graphics, float x, string icon, string text, Color fill, Color ink)
     {
+        var bounds = new RectangleF(x, 14, PillWidth(graphics, text), PillHeight);
         using (var path = Form1.RoundedMenuRenderer.CreateRoundedPath(bounds, bounds.Height / 2))
         using (var brush = new SolidBrush(fill))
         {
@@ -883,8 +893,9 @@ internal sealed class NinjaGame : Panel
 
         TextRenderer.DrawText(graphics, icon, HudEmojiFont, new Rectangle((int)bounds.X + 10, (int)bounds.Y, 28, (int)bounds.Height), ink,
             TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
-        TextRenderer.DrawText(graphics, text, HudFont, new Rectangle((int)bounds.X + 38, (int)bounds.Y, (int)bounds.Width - 42, (int)bounds.Height), ink,
+        TextRenderer.DrawText(graphics, text, HudFont, new Rectangle((int)bounds.X + 38, (int)bounds.Y, (int)bounds.Width - 38, (int)bounds.Height), ink,
             TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        return bounds.Width;
     }
 
     // Start screen with the mode picker, or the result after the last life.
