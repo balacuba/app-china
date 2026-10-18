@@ -165,6 +165,40 @@ public sealed partial class Form1 : Form
         UpdatePracticeScore();
         RefreshVocabulary();
         RefreshStudyWords();
+        AdjustColumnWidths();
+    }
+
+    // Sizes each text column to fit ~95% of its values (and its header), capped so
+    // long example sentences do not stretch the grid; longer cells show a tooltip.
+    private void AdjustColumnWidths()
+    {
+        if (_words.Count == 0)
+        {
+            return;
+        }
+
+        const int maxWidth = 520;
+        var cellFont = _grid.DefaultCellStyle.Font ?? _grid.Font;
+        var headerFont = _grid.ColumnHeadersDefaultCellStyle.Font ?? _grid.Font;
+        var cellPadding = _grid.DefaultCellStyle.Padding.Horizontal + 12;
+        var properties = TypeDescriptor.GetProperties(typeof(VocabularyWord));
+        foreach (DataGridViewColumn column in _grid.Columns)
+        {
+            if (column is not DataGridViewTextBoxColumn ||
+                properties[column.DataPropertyName] is not { } property)
+            {
+                continue;
+            }
+
+            var values = _words
+                .Select(word => Convert.ToString(property.GetValue(word), CultureInfo.CurrentCulture) ?? string.Empty)
+                .OrderBy(value => value.Length)
+                .ToList();
+            var typical = values[(int)((values.Count - 1) * 0.95)];
+            var contentWidth = TextRenderer.MeasureText(typical, cellFont).Width + cellPadding;
+            var headerWidth = TextRenderer.MeasureText(column.HeaderText, headerFont).Width + 20;
+            column.Width = Math.Clamp(Math.Max(contentWidth, headerWidth), 60, maxWidth);
+        }
     }
 
     private void BuildInterface()
@@ -254,7 +288,8 @@ public sealed partial class Form1 : Form
         _grid.AllowUserToDeleteRows = false;
         _grid.AllowUserToResizeRows = false;
         _grid.AutoGenerateColumns = false;
-        _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+        _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
+        _grid.ShowCellToolTips = true;
         _grid.BackgroundColor = Color.White;
         _grid.BorderStyle = BorderStyle.FixedSingle;
         _grid.ColumnHeadersHeight = 42;
@@ -1767,6 +1802,7 @@ public sealed partial class Form1 : Form
             _questionOrderPosition = 0;
             RefreshVocabulary();
             RefreshStudyWords();
+            AdjustColumnWidths();
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
