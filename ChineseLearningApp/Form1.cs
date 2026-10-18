@@ -55,6 +55,14 @@ public sealed partial class Form1 : Form
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "ChineseLearningApp",
         "practice-settings.json");
+    // The ticked "Học" words, kept apart from vocabulary.json so ticking a box
+    // does not rewrite the whole word list.
+    private readonly string _selectedWordsPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "ChineseLearningApp",
+        "selected-words.json");
+    // Off until the saved selection was read, so a failed read is never overwritten.
+    private bool _saveSelectedWords;
     private readonly Dictionary<string, bool> _columnVisibility = new(StringComparer.Ordinal);
     private readonly List<string> _columnOrder = new();
     private readonly Dictionary<string, int> _baseColumnWidths = new(StringComparer.Ordinal);
@@ -196,6 +204,21 @@ public sealed partial class Form1 : Form
             Shown += (_, _) => MessageBox.Show(
                 this,
                 $"Không thể đọc cài đặt thời gian luyện gõ: {ex.Message}",
+                "Lỗi đọc cài đặt",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+
+        try
+        {
+            LoadSelectedWords();
+            _saveSelectedWords = true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
+        {
+            Shown += (_, _) => MessageBox.Show(
+                this,
+                $"Không thể đọc danh sách từ đã chọn học: {ex.Message}",
                 "Lỗi đọc cài đặt",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
@@ -1140,6 +1163,42 @@ public sealed partial class Form1 : Form
             _columnSettingsPath,
             JsonSerializer.Serialize(_columnVisibility, JsonOptions),
             new UTF8Encoding(false));
+    }
+
+    private void LoadSelectedWords()
+    {
+        if (!File.Exists(_selectedWordsPath))
+        {
+            return;
+        }
+
+        var json = File.ReadAllText(_selectedWordsPath, Encoding.UTF8);
+        var saved = JsonSerializer.Deserialize<List<string>>(json)
+            ?? throw new InvalidDataException("Tệp từ đã chọn không chứa danh sách hợp lệ.");
+        var keys = saved.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var word in _words)
+        {
+            word.IsSelected = keys.Contains(word.Chinese);
+        }
+    }
+
+    private void SaveSelectedWords()
+    {
+        if (!_saveSelectedWords)
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_selectedWordsPath)!);
+            var keys = _words.Where(word => word.IsSelected).Select(word => word.Chinese).ToList();
+            File.WriteAllText(_selectedWordsPath, JsonSerializer.Serialize(keys, JsonOptions), new UTF8Encoding(false));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Remembering the ticks is a convenience; studying goes on without it.
+        }
     }
 
     private void LoadPracticeSettings()
@@ -2688,6 +2747,8 @@ public sealed partial class Form1 : Form
         _studyWords.Clear();
         var selectedWords = _words.Where(word => word.IsSelected).ToList();
         _studyWords.AddRange(selectedWords);
+        // Every tick, select-all and list change ends here, so remember the choice.
+        SaveSelectedWords();
         _practiceReviewWords = null;
         _showingMeaning = false;
 
