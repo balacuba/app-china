@@ -994,7 +994,7 @@ public sealed partial class Form1 : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 0));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 15));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 9));
 
@@ -1061,7 +1061,7 @@ public sealed partial class Form1 : Form
         practiceModeBox.Items.AddRange(["Gõ từ vựng", "Gõ câu ví dụ"]);
         practiceModeBox.SelectedIndex = 0;
         practiceModeBox.SelectedIndexChanged += (_, _) => SetPracticeExampleMode(practiceModeBox.SelectedIndex == 1);
-        practiceActions.Controls.AddRange([continueStudyButton, _pausePracticeButton, _skipPracticeButton, practiceModeBox]);
+        practiceActions.Controls.AddRange([continueStudyButton, _pausePracticeButton, _skipPracticeButton]);
         _practiceTimerLabel.Dock = DockStyle.Fill;
         _practiceTimerLabel.Font = new Font("Segoe UI", 12F, FontStyle.Bold);
         _practiceTimerLabel.ForeColor = Accent;
@@ -1070,7 +1070,7 @@ public sealed partial class Form1 : Form
         _practiceScoreLabel.Font = new Font("Segoe UI", 12F, FontStyle.Bold);
         _practiceScoreLabel.TextAlign = ContentAlignment.MiddleCenter;
         _reviewIncorrectWordsButton.Text = "Xem từ đã sai";
-        _reviewIncorrectWordsButton.Anchor = AnchorStyles.None;
+        _reviewIncorrectWordsButton.Margin = new Padding(8, 5, 0, 3);
         _reviewIncorrectWordsButton.AutoSize = true;
         _reviewIncorrectWordsButton.Click += ReviewIncorrectWordsButton_Click;
         _practiceFeedback.Dock = DockStyle.Fill;
@@ -1081,14 +1081,37 @@ public sealed partial class Form1 : Form
         _practiceHint.ForeColor = Color.FromArgb(90, 100, 112);
         _practiceHint.TextAlign = ContentAlignment.TopCenter;
 
-        layout.Controls.Add(title, 0, 0);
+        // Top row: title on the left, mode picker and missed-words button top right.
+        var topRightTools = new FlowLayoutPanel
+        {
+            Anchor = AnchorStyles.Top | AnchorStyles.Right,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Margin = Padding.Empty
+        };
+        practiceModeBox.Margin = new Padding(0, 6, 0, 3);
+        topRightTools.Controls.AddRange([practiceModeBox, _reviewIncorrectWordsButton]);
+        var topBar = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = Padding.Empty
+        };
+        topBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        topBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        topBar.Controls.Add(title, 0, 0);
+        topBar.Controls.Add(topRightTools, 1, 0);
+
+        layout.Controls.Add(topBar, 0, 0);
         layout.Controls.Add(_practiceMeaning, 0, 1);
         layout.Controls.Add(_practiceEnglishMeaning, 0, 2);
         layout.Controls.Add(_answerBox, 0, 3);
         layout.Controls.Add(practiceActions, 0, 4);
         layout.Controls.Add(_practiceTimerLabel, 0, 5);
         layout.Controls.Add(_practiceScoreLabel, 0, 6);
-        layout.Controls.Add(_reviewIncorrectWordsButton, 0, 7);
         layout.Controls.Add(_practiceFeedback, 0, 8);
         layout.Controls.Add(_practiceHint, 0, 9);
         page.Controls.Add(layout);
