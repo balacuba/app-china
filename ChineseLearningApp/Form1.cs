@@ -978,7 +978,19 @@ public sealed partial class Form1 : Form
         for (var index = 0; index < textColumns.Count; index++)
         {
             var column = textColumns[index];
-            var item = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, BackColor = SurfaceColor, Margin = new Padding(0, 0, 24, 0) };
+            // Each column sits in its own light rounded box so its name and controls read as one.
+            var itemFill = Color.FromArgb(248, 250, 252);
+            var box = new RoundedPanel
+            {
+                Dock = DockStyle.Fill,
+                Radius = 14,
+                FillColor = itemFill,
+                OutlineColor = BorderColor,
+                BackColor = SurfaceColor,
+                Margin = new Padding(0, 4, 14, 4),
+                Padding = new Padding(14, 3, 8, 3)
+            };
+            var item = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, BackColor = itemFill, Margin = Padding.Empty };
             item.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             item.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             item.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -1022,12 +1034,13 @@ public sealed partial class Form1 : Form
             item.Controls.Add(SizeButton("−", -1), 1, 0);
             item.Controls.Add(value, 2, 0);
             item.Controls.Add(SizeButton("+", 1), 3, 0);
-            fontGrid.Controls.Add(item, index % fontColumns, index / fontColumns);
+            box.Controls.Add(item);
+            fontGrid.Controls.Add(box, index % fontColumns, index / fontColumns);
         }
 
         for (var row = 0; row < fontRows; row++)
         {
-            fontGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
+            fontGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));
         }
 
         fontGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
@@ -1048,7 +1061,7 @@ public sealed partial class Form1 : Form
         const int headingHeight = 72;
         const int topRowHeight = 168;
         const int bottomRowHeight = 470;
-        var fontsRowHeight = 62 + fontRows * 44 + 52 + 34 + 20;
+        var fontsRowHeight = 62 + fontRows * 54 + 52 + 34 + 20;
         var grid = new TableLayoutPanel { ColumnCount = 2, RowCount = 4, BackColor = PageColor };
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
