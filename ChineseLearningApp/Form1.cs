@@ -264,6 +264,7 @@ public sealed partial class Form1 : Form
         _grid.SelectionMode = DataGridViewSelectionMode.CellSelect;
         _grid.EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2;
         _grid.CellClick += VocabularyGrid_CellClick;
+        _grid.CellDoubleClick += VocabularyGrid_CellDoubleClick;
         _grid.ColumnHeaderMouseClick += VocabularyGrid_ColumnHeaderMouseClick;
         _grid.CellBeginEdit += VocabularyGrid_CellBeginEdit;
         _grid.CellEndEdit += VocabularyGrid_CellEndEdit;
@@ -299,13 +300,8 @@ public sealed partial class Form1 : Form
             column.Tag = column.HeaderText;
             column.SortMode = DataGridViewColumnSortMode.NotSortable;
             column.FillWeight = 1;
-            column.ReadOnly = column.DataPropertyName is not
-                (nameof(VocabularyWord.IsSelected) or
-                 nameof(VocabularyWord.EnglishExample) or
-                 nameof(VocabularyWord.ChineseExample) or
-                 nameof(VocabularyWord.EnglishGrammar) or
-                 nameof(VocabularyWord.VietnameseGrammar) or
-                 nameof(VocabularyWord.VietnameseExample));
+            column.ReadOnly = column.DataPropertyName != nameof(VocabularyWord.IsSelected) &&
+                !IsEditableTextColumn(column.DataPropertyName);
             if (IsFilterableColumn(column.DataPropertyName))
             {
                 column.HeaderText = $"{column.HeaderText}  ▼";
@@ -2135,6 +2131,30 @@ public sealed partial class Form1 : Form
         }
     }
 
+    private static bool IsEditableTextColumn(string propertyName) =>
+        propertyName is
+            nameof(VocabularyWord.Vietnamese) or
+            nameof(VocabularyWord.English) or
+            nameof(VocabularyWord.HskLevel) or
+            nameof(VocabularyWord.EnglishExample) or
+            nameof(VocabularyWord.ChineseExample) or
+            nameof(VocabularyWord.VietnameseExample) or
+            nameof(VocabularyWord.EnglishGrammar) or
+            nameof(VocabularyWord.VietnameseGrammar);
+
+    private void VocabularyGrid_CellDoubleClick(object? sender, DataGridViewCellEventArgs e)
+    {
+        if (e.RowIndex < 0 ||
+            e.ColumnIndex < 0 ||
+            !IsEditableTextColumn(_grid.Columns[e.ColumnIndex].DataPropertyName))
+        {
+            return;
+        }
+
+        _grid.CurrentCell = _grid.Rows[e.RowIndex].Cells[e.ColumnIndex];
+        _grid.BeginEdit(selectAll: false);
+    }
+
     private void VocabularyGrid_CellBeginEdit(object? sender, DataGridViewCellCancelEventArgs e)
     {
         _editingVocabularyCellValue = e.RowIndex >= 0 && e.ColumnIndex >= 0
@@ -2170,18 +2190,29 @@ public sealed partial class Form1 : Form
         }
 
         var column = _grid.Columns[e.ColumnIndex];
-        if (column.DataPropertyName is not
-            (nameof(VocabularyWord.EnglishExample) or
-             nameof(VocabularyWord.ChineseExample) or
-             nameof(VocabularyWord.EnglishGrammar) or
-             nameof(VocabularyWord.VietnameseGrammar) or
-             nameof(VocabularyWord.VietnameseExample)))
+        if (!IsEditableTextColumn(column.DataPropertyName))
         {
             _editingVocabularyCellValue = null;
             return;
         }
 
         var word = _visibleWords[e.RowIndex];
+        if (column.DataPropertyName == nameof(VocabularyWord.Vietnamese) &&
+            string.IsNullOrWhiteSpace(word.Vietnamese))
+        {
+            // A word without a Vietnamese meaning is dropped on the next load.
+            SetEditableVocabularyValue(word, column.DataPropertyName, _editingVocabularyCellValue ?? string.Empty);
+            _editingVocabularyCellValue = null;
+            _visibleWords.ResetItem(e.RowIndex);
+            MessageBox.Show(
+                this,
+                "Nghĩa tiếng Việt không được để trống.",
+                "Thông tin chưa hợp lệ",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return;
+        }
+
         try
         {
             SaveWords(_words.ToList());
@@ -2204,7 +2235,19 @@ public sealed partial class Form1 : Form
 
     private static void SetEditableVocabularyValue(VocabularyWord word, string propertyName, string value)
     {
-        if (propertyName == nameof(VocabularyWord.EnglishExample))
+        if (propertyName == nameof(VocabularyWord.Vietnamese))
+        {
+            word.Vietnamese = value;
+        }
+        else if (propertyName == nameof(VocabularyWord.English))
+        {
+            word.English = value;
+        }
+        else if (propertyName == nameof(VocabularyWord.HskLevel))
+        {
+            word.HskLevel = value;
+        }
+        else if (propertyName == nameof(VocabularyWord.EnglishExample))
         {
             word.EnglishExample = value;
         }
@@ -3056,7 +3099,9 @@ public sealed partial class Form1 : Form
             DataPropertyName = property,
             HeaderText = title,
             Name = property,
-            SortMode = DataGridViewColumnSortMode.Automatic
+            SortMode = DataGridViewColumnSortMode.Automatic,
+            // Clearing a cell must store "" rather than DBNull in a string property.
+            DefaultCellStyle = { DataSourceNullValue = string.Empty }
         };
 
     private static TabPage CreatePage(string title) =>
