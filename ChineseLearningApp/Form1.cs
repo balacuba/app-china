@@ -1068,7 +1068,7 @@ public sealed partial class Form1 : Form
             column.ReadOnly = column.DataPropertyName != nameof(VocabularyWord.IsSelected) &&
                 !IsEditableTextColumn(column.DataPropertyName);
             ApplyColumnFont(column);
-            if (IsFilterableColumn(column.DataPropertyName))
+            if (HasHeaderMenu(column.DataPropertyName))
             {
                 column.HeaderText = $"{column.HeaderText}  ▼";
             }
@@ -3309,11 +3309,6 @@ public sealed partial class Form1 : Form
             _columnFilters[property] = selected;
         }
 
-        if (_grid.Columns[property] is { } column)
-        {
-            UpdateColumnFilterHeader(column);
-        }
-
         RefreshVocabulary();
         // A new set of words starts from its first row.
         if (_grid.RowCount > 0)
@@ -3322,7 +3317,7 @@ public sealed partial class Form1 : Form
         }
     }
 
-    // Mirrors the HSK filter (also set from the header menu) on the tick boxes,
+    // Mirrors the HSK filter on the "Lọc HSK" tick boxes and pill,
     // and shows how many words each level has.
     private void SyncHskFilterChecks()
     {
@@ -3387,8 +3382,10 @@ public sealed partial class Form1 : Form
         return _columnFilters.All(filter => filter.Value.Contains(GetFilterValue(word, filter.Key)));
     }
 
-    private static bool IsFilterableColumn(string propertyName) =>
-        propertyName is nameof(VocabularyWord.Chinese) or nameof(VocabularyWord.HskLevel);
+    // Only the "Tiếng Trung" header opens a menu (the study word picker); the
+    // HSK level is filtered from the "Lọc HSK" pill instead.
+    private static bool HasHeaderMenu(string propertyName) =>
+        propertyName is nameof(VocabularyWord.Chinese);
 
     private static string GetFilterValue(VocabularyWord word, string propertyName) => propertyName switch
     {
@@ -3406,12 +3403,12 @@ public sealed partial class Form1 : Form
         }
 
         var column = _grid.Columns[e.ColumnIndex];
-        if (!IsFilterableColumn(column.DataPropertyName))
+        if (!HasHeaderMenu(column.DataPropertyName))
         {
             return;
         }
 
-        ShowColumnFilter(column);
+        ShowStudyWordMenu(column);
     }
 
     // "Tiếng Trung" lists the words left by the search and the HSK ticks, each
@@ -3666,193 +3663,6 @@ public sealed partial class Form1 : Form
     {
         public override string ToString() =>
             string.IsNullOrWhiteSpace(Word.Pinyin) ? Word.Chinese : $"{Word.Chinese}   {Word.Pinyin}";
-    }
-
-    private void ShowColumnFilter(DataGridViewColumn column)
-    {
-        if (column.DataPropertyName == nameof(VocabularyWord.Chinese))
-        {
-            ShowStudyWordMenu(column);
-            return;
-        }
-
-        var propertyName = column.DataPropertyName;
-        var values = _words
-            .Select(word => GetFilterValue(word, propertyName))
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(value => value, StringComparer.CurrentCultureIgnoreCase)
-            .ToList();
-        var checkedValues = _columnFilters.TryGetValue(propertyName, out var currentFilter)
-            ? new HashSet<string>(currentFilter, StringComparer.Ordinal)
-            : new HashSet<string>(values, StringComparer.Ordinal);
-
-        var dropDown = new ToolStripDropDown
-        {
-            AutoClose = true,
-            Padding = Padding.Empty
-        };
-        var panel = new Panel
-        {
-            BackColor = SystemColors.Window,
-            Size = new Size(300, 360)
-        };
-        var search = new TextBox
-        {
-            Location = new Point(10, 10),
-            PlaceholderText = "Tìm trong các giá trị...",
-            Size = new Size(280, 28)
-        };
-        var selectAll = new CheckBox
-        {
-            AutoCheck = false,
-            AutoSize = true,
-            Location = new Point(10, 44),
-            Text = "Chọn tất cả"
-        };
-        // One list control instead of a checkbox per value: the word list can hold
-        // more values than the per-process window handle limit allows.
-        var optionsList = new CheckedListBox
-        {
-            CheckOnClick = true,
-            IntegralHeight = false,
-            Location = new Point(10, 70),
-            Size = new Size(280, 230)
-        };
-        var updatingOptions = false;
-
-        static string DisplayText(string value) => string.IsNullOrEmpty(value) ? "(Trống)" : value;
-
-        void UpdateSelectAll()
-        {
-            selectAll.CheckState = checkedValues.Count switch
-            {
-                0 => CheckState.Unchecked,
-                _ when checkedValues.Count == values.Count => CheckState.Checked,
-                _ => CheckState.Indeterminate
-            };
-        }
-
-        void UpdateOptions()
-        {
-            var query = search.Text.Trim();
-            updatingOptions = true;
-            optionsList.BeginUpdate();
-            try
-            {
-                optionsList.Items.Clear();
-                foreach (var value in values.Where(value =>
-                             DisplayText(value).Contains(query, StringComparison.CurrentCultureIgnoreCase)))
-                {
-                    optionsList.Items.Add(new FilterOption(value, DisplayText(value)), checkedValues.Contains(value));
-                }
-            }
-            finally
-            {
-                optionsList.EndUpdate();
-                updatingOptions = false;
-            }
-
-            UpdateSelectAll();
-        }
-
-        search.TextChanged += (_, _) => UpdateOptions();
-        optionsList.ItemCheck += (_, e) =>
-        {
-            if (updatingOptions || optionsList.Items[e.Index] is not FilterOption option)
-            {
-                return;
-            }
-
-            if (e.NewValue == CheckState.Checked)
-            {
-                checkedValues.Add(option.Value);
-            }
-            else
-            {
-                checkedValues.Remove(option.Value);
-            }
-
-            UpdateSelectAll();
-        };
-
-        selectAll.Click += (_, _) =>
-        {
-            if (checkedValues.Count < values.Count)
-            {
-                checkedValues.UnionWith(values);
-            }
-            else
-            {
-                checkedValues.Clear();
-            }
-
-            UpdateOptions();
-        };
-
-        var apply = new Button
-        {
-            Location = new Point(150, 315),
-            Size = new Size(66, 32),
-            Text = "OK"
-        };
-        apply.Click += (_, _) =>
-        {
-            var selected = new HashSet<string>(checkedValues, StringComparer.Ordinal);
-            if (selected.Count == values.Count)
-            {
-                _columnFilters.Remove(propertyName);
-            }
-            else
-            {
-                _columnFilters[propertyName] = selected;
-            }
-
-            UpdateColumnFilterHeader(column);
-            dropDown.Close();
-            RefreshVocabulary();
-        };
-
-        var clear = new Button
-        {
-            Location = new Point(78, 315),
-            Size = new Size(66, 32),
-            Text = "Xóa lọc"
-        };
-        clear.Click += (_, _) =>
-        {
-            _columnFilters.Remove(propertyName);
-            UpdateColumnFilterHeader(column);
-            dropDown.Close();
-            RefreshVocabulary();
-        };
-
-        panel.Controls.AddRange([search, selectAll, optionsList, clear, apply]);
-
-        dropDown.Items.Add(new ToolStripControlHost(panel)
-        {
-            AutoSize = false,
-            Margin = Padding.Empty,
-            Padding = Padding.Empty,
-            Size = panel.Size
-        });
-        dropDown.Closed += (_, _) =>
-        {
-            if (!IsDisposed && IsHandleCreated)
-            {
-                BeginInvoke((Action)dropDown.Dispose);
-            }
-        };
-        UpdateOptions();
-
-        var headerBounds = _grid.GetCellDisplayRectangle(column.Index, -1, true);
-        dropDown.Show(_grid.PointToScreen(new Point(headerBounds.Left, headerBounds.Bottom)));
-    }
-
-    private void UpdateColumnFilterHeader(DataGridViewColumn column)
-    {
-        var title = Convert.ToString(column.Tag, CultureInfo.CurrentCulture) ?? column.Name;
-        var filterMark = _columnFilters.ContainsKey(column.DataPropertyName) ? "  ●" : string.Empty;
-        column.HeaderText = $"{title}{filterMark}  ▼";
     }
 
     private void VocabularyGrid_CurrentCellDirtyStateChanged(object? sender, EventArgs e)
@@ -6492,11 +6302,6 @@ public sealed partial class Form1 : Form
         new("今天", "jīntiān", "hôm nay", "today"),
         new("明天", "míngtiān", "ngày mai", "tomorrow")
     ];
-
-    private sealed record FilterOption(string Value, string Text)
-    {
-        public override string ToString() => Text;
-    }
 
     private sealed class VocabularyWord
     {
