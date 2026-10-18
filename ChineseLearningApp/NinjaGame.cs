@@ -45,7 +45,12 @@ internal sealed class NinjaGame : Panel
     private static readonly Font FloatFont = new("Segoe UI Semibold", 13F);
 
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 15 };
-    private readonly System.Windows.Forms.Timer _autoHit = new() { Interval = 350 };
+    // Pause after typing before it is checked, and the longer pause when the text
+    // could still grow into another falling word (你 → 你好).
+    private const int AutoHitDelay = 350;
+    private const int PrefixHitDelay = 1100;
+
+    private readonly System.Windows.Forms.Timer _autoHit = new() { Interval = AutoHitDelay };
     private readonly Stopwatch _clock = new();
     private readonly Random _random = new();
     private readonly List<FallingWord> _words = [];
@@ -70,6 +75,7 @@ internal sealed class NinjaGame : Panel
     private int _hits;
     private bool _running;
     private bool _gameOver;
+    private bool _prefixWaited;
 
     // The ninja on the roof and the shurikens in flight.
     private readonly Queue<FallingWord> _targets = new();
@@ -122,14 +128,23 @@ internal sealed class NinjaGame : Panel
         _input.Width = _inputFrame.Width - 48;
         // Typing is checked a moment after it stops, so a word the input method sends
         // in pieces (你 then 好) arrives whole before it can hit anything.
+        // While the input method is still composing the next character, keep waiting.
         _autoHit.Tick += (_, _) =>
         {
             _autoHit.Stop();
+            if (IsComposing())
+            {
+                _autoHit.Start();
+                return;
+            }
+
             TryHit(fromEnter: false);
         };
         _input.TextChanged += (_, _) =>
         {
             _autoHit.Stop();
+            _prefixWaited = false;
+            _autoHit.Interval = AutoHitDelay;
             _autoHit.Start();
         };
         _input.KeyDown += (_, e) =>
@@ -392,6 +407,41 @@ internal sealed class NinjaGame : Panel
         Invalidate();
     }
 
+    // True while the input method has unfinished text (e.g. "hao" not yet picked as 好).
+    private bool IsComposing()
+    {
+        if (!_input.IsHandleCreated)
+        {
+            return false;
+        }
+
+        var context = ImmGetContext(_input.Handle);
+        if (context == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        try
+        {
+            return ImmGetCompositionStringW(context, GcsCompStr, IntPtr.Zero, 0) > 0;
+        }
+        finally
+        {
+            ImmReleaseContext(_input.Handle, context);
+        }
+    }
+
+    private const int GcsCompStr = 0x0008;
+
+    [System.Runtime.InteropServices.DllImport("imm32.dll")]
+    private static extern IntPtr ImmGetContext(IntPtr hWnd);
+
+    [System.Runtime.InteropServices.DllImport("imm32.dll")]
+    private static extern bool ImmReleaseContext(IntPtr hWnd, IntPtr hIMC);
+
+    [System.Runtime.InteropServices.DllImport("imm32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern int ImmGetCompositionStringW(IntPtr hIMC, int dwIndex, IntPtr lpBuf, int dwBufLen);
+
     // The answer box outline follows the moon, from the app's blue to blood red.
     private void TintInputFrame()
     {
@@ -472,13 +522,17 @@ internal sealed class NinjaGame : Panel
             return;
         }
 
-        // Without Enter, characters only hit when no longer falling word starts with
-        // them (typing 你 must not cut down 你 while the learner is typing 你好).
-        // Pinyin always waits for Enter, since a syllable can start a longer word.
-        if (!fromEnter && _words.Any(falling => !falling.Targeted &&
+        // When a longer falling word starts with the typed characters (你 while 你好 is
+        // also falling), give the learner a little longer to finish 你好 before 你 is
+        // cut down, so neither needs Enter. Pinyin always waits for Enter, since a
+        // syllable can start a longer word.
+        if (!fromEnter && !_prefixWaited && _words.Any(falling => !falling.Targeted &&
                 falling.Word.Chinese.Length > typed.Length &&
                 falling.Word.Chinese.StartsWith(typed, StringComparison.Ordinal)))
         {
+            _prefixWaited = true;
+            _autoHit.Interval = PrefixHitDelay;
+            _autoHit.Start();
             return;
         }
 
