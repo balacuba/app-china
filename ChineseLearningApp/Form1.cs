@@ -61,6 +61,9 @@ public sealed partial class Form1 : Form
     private readonly Label _practiceHint = new();
     private readonly Button _reviewIncorrectWordsButton = new();
     private readonly Button _pausePracticeButton = new();
+    private readonly Button _skipPracticeButton = new();
+    private string _lastAnswerText = string.Empty;
+    private bool _typingSpeechFailed;
     private readonly TextBox _answerBox = new();
     private readonly System.Windows.Forms.Timer _practiceTimer = new() { Interval = 100 };
     private readonly System.Windows.Forms.Timer _flashcardFlipTimer = new() { Interval = 20 };
@@ -958,6 +961,16 @@ public sealed partial class Form1 : Form
         _pausePracticeButton.Padding = new Padding(12, 7, 12, 7);
         _pausePracticeButton.UseVisualStyleBackColor = false;
         _pausePracticeButton.Click += PausePracticeButton_Click;
+        _skipPracticeButton.Text = "Bỏ qua";
+        _skipPracticeButton.Anchor = AnchorStyles.None;
+        _skipPracticeButton.AutoSize = true;
+        _skipPracticeButton.FlatStyle = FlatStyle.Flat;
+        _skipPracticeButton.BackColor = Color.FromArgb(232, 239, 246);
+        _skipPracticeButton.ForeColor = Color.FromArgb(35, 48, 62);
+        _skipPracticeButton.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
+        _skipPracticeButton.Padding = new Padding(12, 7, 12, 7);
+        _skipPracticeButton.UseVisualStyleBackColor = false;
+        _skipPracticeButton.Click += SkipPracticeButton_Click;
         var practiceActions = new FlowLayoutPanel
         {
             Anchor = AnchorStyles.None,
@@ -966,7 +979,7 @@ public sealed partial class Form1 : Form
             FlowDirection = FlowDirection.LeftToRight,
             WrapContents = false
         };
-        practiceActions.Controls.AddRange([continueStudyButton, _pausePracticeButton]);
+        practiceActions.Controls.AddRange([continueStudyButton, _pausePracticeButton, _skipPracticeButton]);
         _practiceTimerLabel.Dock = DockStyle.Fill;
         _practiceTimerLabel.Font = new Font("Segoe UI", 12F, FontStyle.Bold);
         _practiceTimerLabel.ForeColor = Accent;
@@ -2914,6 +2927,7 @@ public sealed partial class Form1 : Form
             _answerBox.Clear();
             _answerBox.Enabled = false;
             _pausePracticeButton.Enabled = false;
+            _skipPracticeButton.Enabled = false;
             _practiceTimer.Stop();
             _questionStopwatch.Reset();
             return;
@@ -2921,6 +2935,7 @@ public sealed partial class Form1 : Form
 
         _answerBox.Enabled = true;
         _pausePracticeButton.Enabled = true;
+        _skipPracticeButton.Enabled = true;
         if (_questionOrderPosition >= _questionOrder.Count)
         {
             RefillQuestionOrder();
@@ -2988,6 +3003,24 @@ public sealed partial class Form1 : Form
 
     private void AnswerBox_TextChanged(object? sender, EventArgs e)
     {
+        // Read out the Chinese characters the IME has just committed.
+        var currentText = _answerBox.Text;
+        var commonPrefix = 0;
+        while (commonPrefix < currentText.Length &&
+               commonPrefix < _lastAnswerText.Length &&
+               currentText[commonPrefix] == _lastAnswerText[commonPrefix])
+        {
+            commonPrefix++;
+        }
+
+        var addedChinese = string.Concat(currentText[commonPrefix..].Where(character =>
+            System.Text.RegularExpressions.Regex.IsMatch(character.ToString(), @"\p{IsCJKUnifiedIdeographs}")));
+        _lastAnswerText = currentText;
+        if (_answerBox.Enabled && addedChinese.Length > 0)
+        {
+            SpeakTypedChinese(addedChinese);
+        }
+
         var practiceWords = PracticeWords;
         if (_questionIndex >= 0 &&
             _questionIndex < practiceWords.Count &&
@@ -3001,6 +3034,60 @@ public sealed partial class Form1 : Form
     private void CheckAnswer(object? sender, EventArgs e)
     {
         CompleteAnswer(timedOut: false);
+    }
+
+    // Skipping shows (and reads) the answer, adds the word to the review list,
+    // and moves on without counting it as right or wrong.
+    private void SkipPracticeButton_Click(object? sender, EventArgs e)
+    {
+        var practiceWords = PracticeWords;
+        if (_practicePaused || _answerChecked || _questionIndex < 0 || _questionIndex >= practiceWords.Count)
+        {
+            return;
+        }
+
+        var word = practiceWords[_questionIndex];
+        _incorrectWordCounts[word.Chinese] = _incorrectWordCounts.GetValueOrDefault(word.Chinese) + 1;
+        var pinyin = string.IsNullOrWhiteSpace(word.Pinyin) ? string.Empty : $" ({word.Pinyin})";
+        _practiceFeedback.Text = $"Đã bỏ qua. Đáp án: {word.Chinese}{pinyin}";
+        _practiceFeedback.ForeColor = Color.DarkOrange;
+        _answerChecked = true;
+        _answerBox.Enabled = false;
+        _questionStopwatch.Stop();
+        _advanceAt = Environment.TickCount64 + 1800;
+        UpdatePracticeScore();
+        SpeakTypedChinese(word.Chinese);
+    }
+
+    // Reads Chinese aloud while practising; a missing voice is reported only once.
+    private void SpeakTypedChinese(string text)
+    {
+        if (_typingSpeechFailed || string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        try
+        {
+            EnsureSpeechVoice(0x0004);
+            dynamic voice = _speechVoice!;
+            voice.Speak(text, 3);
+        }
+        catch (Exception ex) when (
+            ex is COMException or
+            InvalidOperationException or
+            Microsoft.CSharp.RuntimeBinder.RuntimeBinderException or
+            System.Reflection.TargetInvocationException)
+        {
+            _typingSpeechFailed = true;
+            ReleaseSpeechVoice();
+            MessageBox.Show(
+                this,
+                $"Không thể phát âm bằng giọng {GetLanguageName(0x0004)}: {ex.Message}",
+                "Lỗi phát âm",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
     }
 
     private void CompleteAnswer(bool timedOut)
