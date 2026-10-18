@@ -365,10 +365,21 @@ public sealed partial class Form1 : Form
         var practicePage = BuildPracticePage();
         // Pages are switched from the ☰ menu button in the header.
         var tabs = new PageHost { Dock = DockStyle.Fill, Font = new Font(UiFontName, 10.5F) };
-        tabs.TabPages.Add(BuildVocabularyPage());
-        tabs.TabPages.Add(BuildFlashcardPage());
+        var vocabularyPage = BuildVocabularyPage();
+        var flashcardPage = BuildFlashcardPage();
+        var settingsPage = BuildColumnSettingsPage();
+        // The app opens on Home, which leads to the other pages.
+        tabs.TabPages.Add(BuildHomePage(tabs,
+        [
+            new HomeDestination(vocabularyPage, "📚", "Xem, tìm kiếm và tích chọn từ để học", Color.FromArgb(219, 234, 254)),
+            new HomeDestination(flashcardPage, "🃏", "Lật thẻ để nhớ nghĩa, ví dụ và ngữ pháp", Color.FromArgb(252, 231, 243)),
+            new HomeDestination(practicePage, "⌨", "Gõ lại từ và câu ví dụ bằng tiếng Trung", Color.FromArgb(220, 252, 231)),
+            new HomeDestination(settingsPage, "⚙", "Nhập, thêm từ và chọn cột hiển thị", Color.FromArgb(254, 243, 199))
+        ]));
+        tabs.TabPages.Add(vocabularyPage);
+        tabs.TabPages.Add(flashcardPage);
         tabs.TabPages.Add(practicePage);
-        tabs.TabPages.Add(BuildColumnSettingsPage());
+        tabs.TabPages.Add(settingsPage);
         tabs.SelectedIndexChanged += PracticeTab_SelectedIndexChanged;
         _tabs = tabs;
         _practicePage = practicePage;
@@ -408,7 +419,7 @@ public sealed partial class Form1 : Form
         menuButton.Size = new Size(230, 40);
         menuButton.Anchor = AnchorStyles.Left;
         menuButton.Margin = Padding.Empty;
-        string[] pageIcons = ["📚", "🃏", "⌨", "⚙"];
+        string[] pageIcons = ["🏠", "📚", "🃏", "⌨", "⚙"];
         var pageLabels = tabs.TabPages.Cast<TabPage>()
             .Select((page, index) => $"{pageIcons[index % pageIcons.Length]}  {page.Text}")
             .ToList();
@@ -438,6 +449,104 @@ public sealed partial class Form1 : Form
         row.Controls.Add(greeting, 2, 0);
         header.Controls.Add(row);
         return header;
+    }
+
+    private sealed record HomeDestination(TabPage Page, string Icon, string Description, Color BadgeColor);
+
+    // Home: a greeting, a short summary of the word list and one big card per page.
+    private TabPage BuildHomePage(TabControl tabs, IReadOnlyList<HomeDestination> destinations)
+    {
+        var page = CreatePage("Trang chủ");
+        var host = new Panel { Dock = DockStyle.Fill, BackColor = PageColor };
+        var title = new Label
+        {
+            AutoSize = true,
+            Font = new Font("Segoe UI Semibold", 26F),
+            ForeColor = TextColor,
+            Text = $"Xin chào, {_userName}! 👋"
+        };
+        var subtitle = new Label
+        {
+            AutoSize = true,
+            Font = new Font(UiFontName, 13F),
+            ForeColor = MutedTextColor,
+            Text = "Hôm nay bạn muốn học gì?"
+        };
+        var summary = new PillLabel
+        {
+            AutoSize = false,
+            Font = new Font(UiFontName, 11F, FontStyle.Bold),
+            ForeColor = Accent,
+            TextAlign = ContentAlignment.MiddleCenter
+        };
+        void UpdateSummary()
+        {
+            var selected = _words.Count(word => word.IsSelected);
+            summary.Text = $"📖  {_words.Count} từ vựng   •   ✅  {selected} từ đang chọn học";
+        }
+
+        var tiles = destinations.Select(destination =>
+        {
+            var tile = new HomeTile
+            {
+                Icon = destination.Icon,
+                Title = destination.Page.Text,
+                Description = destination.Description,
+                BadgeColor = destination.BadgeColor
+            };
+            tile.Click += (_, _) => tabs.SelectedTab = destination.Page;
+            return tile;
+        }).ToList();
+
+        host.Controls.Add(title);
+        host.Controls.Add(subtitle);
+        host.Controls.Add(summary);
+        host.Controls.AddRange(tiles.ToArray());
+
+        // Centre everything; four cards in a row when there is room, else two rows of two.
+        void LayoutHome()
+        {
+            UpdateSummary();
+            var summaryText = TextRenderer.MeasureText(summary.Text, summary.Font);
+            summary.Size = new Size(summaryText.Width + 48, summaryText.Height + 18);
+            const int tileWidth = 280;
+            const int tileHeight = 190;
+            const int gap = 24;
+            var columns = host.ClientSize.Width >= 4 * tileWidth + 3 * gap + 80 ? 4 : 2;
+            var rows = (tiles.Count + columns - 1) / columns;
+            var gridWidth = columns * tileWidth + (columns - 1) * gap;
+            var gridHeight = rows * tileHeight + (rows - 1) * gap;
+            var totalHeight = title.Height + 8 + subtitle.Height + 20 + summary.Height + 40 + gridHeight;
+            var top = Math.Max(20, (host.ClientSize.Height - totalHeight) / 2);
+            var centerX = host.ClientSize.Width / 2;
+            title.Location = new Point(centerX - title.Width / 2, top);
+            top += title.Height + 8;
+            subtitle.Location = new Point(centerX - subtitle.Width / 2, top);
+            top += subtitle.Height + 20;
+            summary.Location = new Point(centerX - summary.Width / 2, top);
+            top += summary.Height + 40;
+            var left = centerX - gridWidth / 2;
+            for (var index = 0; index < tiles.Count; index++)
+            {
+                tiles[index].Bounds = new Rectangle(
+                    left + index % columns * (tileWidth + gap),
+                    top + index / columns * (tileHeight + gap),
+                    tileWidth,
+                    tileHeight);
+            }
+        }
+
+        host.Resize += (_, _) => LayoutHome();
+        // The counts change while the user studies, so refresh them on every visit.
+        tabs.SelectedIndexChanged += (_, _) =>
+        {
+            if (tabs.SelectedTab == page)
+            {
+                LayoutHome();
+            }
+        };
+        page.Controls.Add(host);
+        return page;
     }
 
     private TabPage BuildVocabularyPage()
@@ -2864,6 +2973,80 @@ public sealed partial class Form1 : Form
         }
 
         return (lines, lineHeight);
+    }
+
+    // A large rounded card on the Home page: emoji badge, title and a short
+    // description. It lifts to an accent outline while the mouse is over it.
+    private sealed class HomeTile : Control
+    {
+        private bool _hover;
+        public string Icon { get; set; } = "";
+        public string Title { get; set; } = "";
+        public string Description { get; set; } = "";
+        public Color BadgeColor { get; set; } = AccentSoft;
+
+        public HomeTile()
+        {
+            SetStyle(
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw |
+                ControlStyles.UserPaint,
+                true);
+            Cursor = Cursors.Hand;
+            BackColor = PageColor;
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            _hover = true;
+            Invalidate();
+            base.OnMouseEnter(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            _hover = false;
+            Invalidate();
+            base.OnMouseLeave(e);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var graphics = e.Graphics;
+            graphics.Clear(BackColor);
+            graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            var card = new RectangleF(2, 2, Width - 5, Height - 5);
+            using (var path = RoundedMenuRenderer.CreateRoundedPath(card, 22))
+            using (var fill = new SolidBrush(_hover ? Color.FromArgb(248, 251, 255) : SurfaceColor))
+            using (var outline = new Pen(_hover ? Accent : BorderColor, _hover ? 2.5F : 1.5F))
+            {
+                graphics.FillPath(fill, path);
+                graphics.DrawPath(outline, path);
+            }
+
+            // Round pastel badge with the emoji, centred near the top.
+            const int badge = 64;
+            var badgeBounds = new RectangleF((Width - badge) / 2F, 24, badge, badge);
+            using (var badgeFill = new SolidBrush(BadgeColor))
+            {
+                graphics.FillEllipse(badgeFill, badgeBounds);
+            }
+
+            using var iconFont = new Font("Segoe UI Emoji", 24F);
+            TextRenderer.DrawText(graphics, Icon, iconFont, Rectangle.Round(badgeBounds), TextColor,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+
+            using var titleFont = new Font("Segoe UI Semibold", 14F);
+            var titleTop = (int)badgeBounds.Bottom + 14;
+            TextRenderer.DrawText(graphics, Title, titleFont, new Rectangle(12, titleTop, Width - 24, 30),
+                _hover ? Accent : TextColor, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+
+            using var descriptionFont = new Font(UiFontName, 10F);
+            TextRenderer.DrawText(graphics, Description, descriptionFont,
+                new Rectangle(20, titleTop + 34, Width - 40, Height - titleTop - 44), MutedTextColor,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.Top | TextFormatFlags.WordBreak);
+        }
     }
 
     // A checkbox drawn with the same rounded tick box as the word list.
