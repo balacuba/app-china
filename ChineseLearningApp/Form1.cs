@@ -115,6 +115,7 @@ public sealed partial class Form1 : Form
     private readonly CountdownClock _practiceClock = new();
     private readonly Label _practiceHint = new();
     private readonly RoundedButton _reviewIncorrectWordsButton = new();
+    private readonly RoundedButton _reviewCorrectWordsButton = new();
     private readonly RoundedButton _pausePracticeButton = new();
     private readonly RoundedButton _skipPracticeButton = new();
     private string _lastAnswerText = string.Empty;
@@ -1981,10 +1982,7 @@ public sealed partial class Form1 : Form
         _answerBox.TextChanged += AnswerBox_TextChanged;
         _answerBox.KeyDown += AnswerBox_KeyDown;
 
-        var continueStudyButton = CreateButton(
-            "Học lại",
-            (_, _) => StartPracticeWithWords(_words.ToList()),
-            secondary: false);
+        var continueStudyButton = CreateButton("Học lại", RestartPracticeAndClearResults, secondary: false);
         continueStudyButton.Anchor = AnchorStyles.None;
         _pausePracticeButton.Text = "Tạm dừng";
         _pausePracticeButton.Anchor = AnchorStyles.None;
@@ -2023,6 +2021,9 @@ public sealed partial class Form1 : Form
         _reviewIncorrectWordsButton.Text = "Xem từ đã sai";
         StyleButton(_reviewIncorrectWordsButton, ButtonKind.Secondary);
         _reviewIncorrectWordsButton.Click += ReviewIncorrectWordsButton_Click;
+        _reviewCorrectWordsButton.Text = "Xem từ đã gõ đúng";
+        StyleButton(_reviewCorrectWordsButton, ButtonKind.Secondary);
+        _reviewCorrectWordsButton.Click += ReviewCorrectWordsButton_Click;
         _practiceFeedback.Dock = DockStyle.Fill;
         _practiceFeedback.Font = new Font("Segoe UI", 14F, FontStyle.Bold);
         _practiceFeedback.TextAlign = ContentAlignment.TopCenter;
@@ -2042,7 +2043,7 @@ public sealed partial class Form1 : Form
             Margin = Padding.Empty
         };
         // Both top-right buttons share one fixed size so they line up.
-        foreach (var button in new Button[] { practiceModeBox, _reviewIncorrectWordsButton })
+        foreach (var button in new Button[] { practiceModeBox, _reviewIncorrectWordsButton, _reviewCorrectWordsButton })
         {
             button.AutoSize = false;
             button.Size = new Size(200, 40);
@@ -2050,7 +2051,8 @@ public sealed partial class Form1 : Form
 
         practiceModeBox.Margin = new Padding(0, 3, 0, 3);
         _reviewIncorrectWordsButton.Margin = new Padding(10, 3, 0, 3);
-        topRightTools.Controls.AddRange([practiceModeBox, _reviewIncorrectWordsButton]);
+        _reviewCorrectWordsButton.Margin = new Padding(10, 3, 0, 3);
+        topRightTools.Controls.AddRange([practiceModeBox, _reviewIncorrectWordsButton, _reviewCorrectWordsButton]);
         var topBar = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -5631,6 +5633,8 @@ public sealed partial class Form1 : Form
         SaveTypedCorrectWords();
         _reviewIncorrectWordsButton.Text = $"Xem từ đã sai ({_incorrectWordCounts.Count})";
         _reviewIncorrectWordsButton.Enabled = _incorrectWordCounts.Count > 0;
+        _reviewCorrectWordsButton.Text = $"Xem từ đã gõ đúng ({_typedCorrectWords.Count})";
+        _reviewCorrectWordsButton.Enabled = _typedCorrectWords.Count > 0;
     }
 
     private void ReviewIncorrectWordsButton_Click(object? sender, EventArgs e)
@@ -5640,52 +5644,164 @@ public sealed partial class Form1 : Form
             .OrderByDescending(word => _incorrectWordCounts[word.Chinese])
             .ThenBy(word => word.Chinese, StringComparer.CurrentCulture)
             .ToList();
-        if (missedWords.Count == 0)
-        {
-            MessageBox.Show(
+        ShowPracticeWordsDialog(
+            missedWords,
+            "❌",
+            Color.FromArgb(254, 226, 226),
+            "Danh sách từ đã trả lời sai",
+            "Chưa có từ nào trả lời sai.",
+            "Số lần sai",
+            word => _incorrectWordCounts[word.Chinese]);
+    }
+
+    // "Học lại": after a confirmation, wipes the typing results (score, missed
+    // words, words typed correctly) and starts practice again from the beginning.
+    private void RestartPracticeAndClearResults(object? sender, EventArgs e)
+    {
+        var hasResults = _correctAnswerCount + _wrongAnswerCount > 0 ||
+            _incorrectWordCounts.Count > 0 ||
+            _typedCorrectWords.Count > 0;
+        if (hasResults && MessageBox.Show(
                 this,
-                "Chưa có từ nào trả lời sai.",
-                "Từ đã sai",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
+                "Học lại từ đầu sẽ xóa toàn bộ kết quả luyện gõ:\n" +
+                $"• Số câu đúng / sai ({_correctAnswerCount} / {_wrongAnswerCount})\n" +
+                $"• Danh sách từ đã sai ({_incorrectWordCounts.Count} từ)\n" +
+                $"• Danh sách từ đã gõ đúng ({_typedCorrectWords.Count} từ)\n\n" +
+                "Bạn có muốn tiếp tục không?",
+                "Học lại",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question) != DialogResult.Yes)
+        {
+            return;
+        }
+
+        _correctAnswerCount = 0;
+        _wrongAnswerCount = 0;
+        _incorrectWordCounts.Clear();
+        _typedCorrectWords.Clear();
+        _practiceFeedback.Text = string.Empty;
+        UpdatePracticeScore();
+        StartPracticeWithWords(_words.ToList());
+    }
+
+    private void ReviewCorrectWordsButton_Click(object? sender, EventArgs e)
+    {
+        // Ordered by HSK level, then by word, like the word list.
+        var correctWords = _words
+            .Where(word => _typedCorrectWords.Contains(word.Chinese))
+            .OrderBy(word => string.IsNullOrEmpty(word.HskLevel) ? "~" : word.HskLevel, StringComparer.Ordinal)
+            .ThenBy(word => word.Chinese, StringComparer.CurrentCulture)
+            .ToList();
+        ShowPracticeWordsDialog(
+            correctWords,
+            "✅",
+            Color.FromArgb(220, 252, 231),
+            "Danh sách từ đã gõ đúng",
+            "Chưa có từ nào gõ đúng.",
+            "Cấp HSK",
+            word => word.HskLevel);
+    }
+
+    // Lists practice words in a rounded card with rounded tick boxes to pick
+    // some for another round of typing practice; the last column is supplied
+    // by the caller.
+    private void ShowPracticeWordsDialog(
+        IReadOnlyList<VocabularyWord> words,
+        string icon,
+        Color badgeColor,
+        string title,
+        string emptyMessage,
+        string extraHeader,
+        Func<VocabularyWord, object> extraValue)
+    {
+        if (words.Count == 0)
+        {
+            MessageBox.Show(this, emptyMessage, title, MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
 
         using var dialog = new Form
         {
-            Text = "Danh sách từ đã trả lời sai",
+            Text = title,
             StartPosition = FormStartPosition.CenterParent,
-            MinimumSize = new Size(720, 360),
-            Size = new Size(820, 440),
-            Font = Font
+            MinimumSize = new Size(760, 420),
+            Size = new Size(940, 600),
+            BackColor = PageColor,
+            Font = new Font(UiFontName, 10.5F),
+            Padding = new Padding(22, 18, 22, 16),
+            ShowInTaskbar = false
         };
+
+        var header = new SectionHeader
+        {
+            Dock = DockStyle.Top,
+            Height = 60,
+            Icon = icon,
+            BadgeColor = badgeColor,
+            Title = title,
+            Description = $"{words.Count} từ • tích chọn các từ muốn luyện gõ lại",
+            BackColor = PageColor
+        };
+
         var results = new DataGridView
         {
             AllowUserToAddRows = false,
             AllowUserToDeleteRows = false,
+            AllowUserToResizeRows = false,
             AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+            BackgroundColor = SurfaceColor,
+            BorderStyle = BorderStyle.None,
+            CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
+            ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None,
+            ColumnHeadersHeight = 42,
+            ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing,
             Dock = DockStyle.Fill,
+            EnableHeadersVisualStyles = false,
+            GridColor = BorderColor,
             ReadOnly = false,
             RowHeadersVisible = false,
             SelectionMode = DataGridViewSelectionMode.CellSelect
         };
+        results.RowTemplate.Height = 40;
+        results.ColumnHeadersDefaultCellStyle.BackColor = HeaderRowColor;
+        results.ColumnHeadersDefaultCellStyle.ForeColor = BodyTextColor;
+        results.ColumnHeadersDefaultCellStyle.SelectionBackColor = HeaderRowColor;
+        results.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI Semibold", 10F);
+        results.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+        results.DefaultCellStyle.BackColor = SurfaceColor;
+        results.DefaultCellStyle.ForeColor = TextColor;
+        results.DefaultCellStyle.SelectionBackColor = AccentSoft;
+        results.DefaultCellStyle.SelectionForeColor = TextColor;
+        results.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+        results.AlternatingRowsDefaultCellStyle.BackColor = StripeRowColor;
         results.Columns.Add(new DataGridViewCheckBoxColumn
         {
             Name = "Retest",
             HeaderText = "Ôn lại",
             FillWeight = 8,
-            MinimumWidth = 60
+            MinimumWidth = 70
         });
         results.Columns.Add("Chinese", "Tiếng Trung");
         results.Columns.Add("Pinyin", "Pinyin");
         results.Columns.Add("Vietnamese", "Nghĩa tiếng Việt");
         results.Columns.Add("English", "Nghĩa tiếng Anh");
-        results.Columns.Add("WrongCount", "Số lần sai");
+        results.Columns.Add("Extra", extraHeader);
+        results.Columns["Chinese"]!.DefaultCellStyle.Font = new Font("Microsoft YaHei UI", 12F);
+        results.Columns["Chinese"]!.DefaultCellStyle.ForeColor = Accent;
         foreach (DataGridViewColumn column in results.Columns)
         {
             column.ReadOnly = column.Name != "Retest";
+            column.SortMode = DataGridViewColumnSortMode.NotSortable;
         }
 
+        // Same rounded tick boxes as the word list.
+        results.CellPainting += (_, e) =>
+        {
+            if (e.RowIndex >= 0 && e.ColumnIndex == 0)
+            {
+                PaintRoundedCheckBox(e);
+            }
+        };
         results.CurrentCellDirtyStateChanged += (_, _) =>
         {
             if (results.IsCurrentCellDirty && results.CurrentCell?.OwningColumn.Name == "Retest")
@@ -5693,8 +5809,7 @@ public sealed partial class Form1 : Form
                 results.CommitEdit(DataGridViewDataErrorContexts.Commit);
             }
         };
-        var missedWordSelection = new List<VocabularyWord>();
-        foreach (var word in missedWords)
+        foreach (var word in words)
         {
             var rowIndex = results.Rows.Add(
                 false,
@@ -5702,64 +5817,69 @@ public sealed partial class Form1 : Form
                 word.Pinyin,
                 word.Vietnamese,
                 word.English,
-                _incorrectWordCounts[word.Chinese]);
+                extraValue(word));
             results.Rows[rowIndex].Tag = word;
         }
 
-        var selectAllButton = new Button
+        // The grid sits in a rounded white card.
+        var card = new RoundedPanel
         {
-            Location = new Point(12, 8),
-            Size = new Size(118, 32),
-            Text = "Chọn tất cả"
+            Dock = DockStyle.Fill,
+            Radius = 16,
+            FillColor = SurfaceColor,
+            OutlineColor = BorderColor,
+            BackColor = PageColor,
+            Padding = new Padding(8)
         };
-        selectAllButton.Click += (_, _) =>
+        card.Controls.Add(results);
+
+        void SetAll(bool value)
         {
+            results.EndEdit();
             foreach (DataGridViewRow row in results.Rows)
             {
-                row.Cells["Retest"].Value = true;
+                row.Cells["Retest"].Value = value;
             }
-        };
-        var retestButton = new Button
+        }
+
+        var selection = new List<VocabularyWord>();
+        var selectAllButton = CreateButton("✔  Chọn tất cả", (_, _) => SetAll(true), secondary: true);
+        var clearButton = CreateButton("Bỏ chọn", (_, _) => SetAll(false), secondary: true);
+        var retestButton = CreateButton("⌨  Luyện lại đã chọn", (_, _) =>
         {
-            Location = new Point(525, 8),
-            Size = new Size(170, 32),
-            Text = "Luyện lại đã chọn"
-        };
-        retestButton.Click += (_, _) =>
-        {
-            if (!GetSelectedMissedWords(results, missedWordSelection, dialog))
+            if (!GetSelectedMissedWords(results, selection, dialog))
             {
                 return;
             }
 
             dialog.DialogResult = DialogResult.OK;
             dialog.Close();
-        };
-        var closeButton = new Button
-        {
-            DialogResult = DialogResult.Cancel,
-            Size = new Size(82, 32),
-            Margin = new Padding(4, 4, 12, 4),
-            Text = "Đóng"
-        };
-        var footer = new Panel { Dock = DockStyle.Bottom, Height = 48 };
-        var actionButtons = new FlowLayoutPanel
-        {
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Dock = DockStyle.Right,
-            FlowDirection = FlowDirection.RightToLeft,
-            WrapContents = false
-        };
-        actionButtons.Controls.AddRange([closeButton, retestButton]);
-        footer.Controls.Add(selectAllButton);
-        footer.Controls.Add(actionButtons);
-        dialog.Controls.Add(results);
+        });
+        var closeButton = CreateButton("Đóng", (_, _) => dialog.Close(), secondary: true);
+        closeButton.DialogResult = DialogResult.Cancel;
+
+        var footer = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 62, ColumnCount = 3, BackColor = PageColor, Padding = new Padding(0, 14, 0, 0) };
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        var leftButtons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, BackColor = PageColor, Margin = Padding.Empty };
+        leftButtons.Controls.AddRange([selectAllButton, clearButton]);
+        var rightButtons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, BackColor = PageColor, Margin = Padding.Empty };
+        rightButtons.Controls.AddRange([retestButton, closeButton]);
+        closeButton.Margin = Padding.Empty;
+        footer.Controls.Add(leftButtons, 0, 0);
+        footer.Controls.Add(rightButtons, 2, 0);
+
+        var spacer = new Panel { Dock = DockStyle.Top, Height = 10, BackColor = PageColor };
+        dialog.Controls.Add(card);
+        dialog.Controls.Add(spacer);
+        dialog.Controls.Add(header);
         dialog.Controls.Add(footer);
+        dialog.AcceptButton = retestButton;
         dialog.CancelButton = closeButton;
         if (dialog.ShowDialog(this) == DialogResult.OK)
         {
-            StartPracticeWithWords(missedWordSelection);
+            StartPracticeWithWords(selection);
         }
     }
 
