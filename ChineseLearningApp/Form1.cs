@@ -3657,6 +3657,7 @@ public sealed partial class Form1 : Form
             _flashcardFace.Font = new Font("Segoe UI", 16F);
             _flashcardFace.Visible = true;
             _flashcardBackLayout.Visible = false;
+            CenterFlashcardCard();
             return;
         }
 
@@ -3686,6 +3687,8 @@ public sealed partial class Form1 : Form
             _flashcardFace.Visible = true;
             _flashcardBackLayout.Visible = false;
         }
+
+        CenterFlashcardCard();
     }
 
     private void ToggleFlashcard(object? sender, EventArgs e)
@@ -3714,8 +3717,12 @@ public sealed partial class Form1 : Form
         const int animationFrames = 10;
         _flashcardAnimationFrame++;
         var scale = Math.Abs(animationFrames / 2f - _flashcardAnimationFrame) / (animationFrames / 2f);
-        _flashcardCard.Width = Math.Max(2, (int)(GetFlashcardCardSize().Width * scale));
+        // Front and back have different sizes: shrink with the old one, grow into the new one.
+        var size = GetFlashcardCardSize();
+        _flashcardCard.Width = Math.Max(2, (int)(size.Width * scale));
+        _flashcardCard.Height = size.Height;
         _flashcardCard.Left = (_flashcardHost.ClientSize.Width - _flashcardCard.Width) / 2;
+        _flashcardCard.Top = (_flashcardHost.ClientSize.Height - size.Height) / 2;
 
         if (_flashcardAnimationFrame == animationFrames / 2)
         {
@@ -3737,7 +3744,20 @@ public sealed partial class Form1 : Form
         var hostHeight = _flashcardHost.ClientSize.Height;
         var width = Math.Max(2, Math.Min(hostWidth - 48, Math.Clamp((int)(hostWidth * 0.75), 620, 1100)));
         var height = Math.Max(2, Math.Min(hostHeight - 24, Math.Clamp((int)(hostHeight * 0.8), 300, 700)));
-        return new Size(width, height);
+        if (_showingMeaning)
+        {
+            return new Size(width, height);
+        }
+
+        // The front only shows the word, so the card shrinks to fit it.
+        var text = TextRenderer.MeasureText(
+            string.IsNullOrEmpty(_flashcardFace.Text) ? " " : _flashcardFace.Text,
+            _flashcardFace.Font,
+            new Size(Math.Max(100, width - 120), 10_000),
+            TextFormatFlags.WordBreak);
+        return new Size(
+            Math.Min(width, Math.Max(260, text.Width + 140)),
+            Math.Min(height, Math.Max(180, text.Height + 110)));
     }
 
     private void CenterFlashcardCard()
