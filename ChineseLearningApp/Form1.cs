@@ -844,8 +844,8 @@ public sealed partial class Form1 : Form
             WrapContents = false,
             Padding = Padding.Empty
         };
-        // Search: a rounded "Tìm từ" pill that opens into a rounded search box.
-        // The box closes back into the pill when it is empty and loses focus.
+        // Search: a rounded "Tìm từ" pill that opens into a rounded search box when
+        // the mouse moves onto it, and folds back once it is empty and the mouse leaves.
         const int searchOpenWidth = 420;
         var searchButton = CreateButton("🔍  Tìm từ", (_, _) => { }, secondary: true);
         searchButton.AutoSize = false;
@@ -908,26 +908,52 @@ public sealed partial class Form1 : Form
                 searchAnimation.Stop();
             }
         };
-        page.Disposed += (_, _) => searchAnimation.Dispose();
+        // While open, watch the mouse: once the box is empty and the pointer has
+        // left it, it folds back into the pill.
+        var searchHoverWatch = new System.Windows.Forms.Timer { Interval = 150 };
+        page.Disposed += (_, _) =>
+        {
+            searchAnimation.Dispose();
+            searchHoverWatch.Dispose();
+        };
         void OpenSearch()
         {
+            if (searchFrame.Visible)
+            {
+                return;
+            }
+
             searchButton.Visible = false;
             searchFrame.Width = 140;
             searchFrame.Visible = true;
             _searchBox.Focus();
             searchAnimation.Start();
+            searchHoverWatch.Start();
         }
 
         void CloseSearchIfEmpty()
         {
-            if (string.IsNullOrEmpty(_searchBox.Text))
+            var pointerInside = searchFrame.Visible &&
+                Rectangle.Inflate(searchFrame.RectangleToScreen(searchFrame.ClientRectangle), 6, 6).Contains(Cursor.Position);
+            if (!string.IsNullOrEmpty(_searchBox.Text) || pointerInside)
             {
-                searchAnimation.Stop();
-                searchFrame.Visible = false;
-                searchButton.Visible = true;
+                return;
             }
+
+            searchAnimation.Stop();
+            searchHoverWatch.Stop();
+            if (_searchBox.Focused)
+            {
+                _grid.Focus();
+            }
+
+            searchFrame.Visible = false;
+            searchButton.Visible = true;
         }
 
+        searchHoverWatch.Tick += (_, _) => CloseSearchIfEmpty();
+        searchButton.MouseEnter += (_, _) => OpenSearch();
+        searchButton.MouseMove += (_, _) => OpenSearch();
         searchButton.Click += (_, _) => OpenSearch();
         searchIcon.Click += (_, _) => _searchBox.Focus();
         clearSearch.Click += (_, _) =>
@@ -946,7 +972,6 @@ public sealed partial class Form1 : Form
             searchFrame.OutlineColor = BorderColor;
             searchFrame.OutlineWidth = 1.5F;
             searchFrame.Invalidate();
-            CloseSearchIfEmpty();
         };
         _searchBox.KeyDown += (_, e) =>
         {
@@ -965,6 +990,7 @@ public sealed partial class Form1 : Form
                 searchButton.Visible = false;
                 searchFrame.Width = searchOpenWidth;
                 searchFrame.Visible = true;
+                searchHoverWatch.Start();
             }
 
             RefreshVocabulary();
