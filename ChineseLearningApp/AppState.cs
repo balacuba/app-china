@@ -4,8 +4,9 @@ using System.Text.Json;
 namespace ChineseLearningApp;
 
 // Study data from the last session that is not stored elsewhere: the user's
-// name and the typing score. Only data is kept; the app always reopens on Home
-// with its usual window and no filters. Saved on close, read at startup.
+// name, the typing score and the best ninja game score. Only data is kept;
+// the app always reopens on Home with its usual window and no filters. Saved on
+// close, read at startup.
 internal sealed class AppState
 {
     private static readonly string FilePath = Path.Combine(
@@ -16,6 +17,7 @@ internal sealed class AppState
     public string UserName { get; set; } = string.Empty;
     public int CorrectAnswers { get; set; }
     public int WrongAnswers { get; set; }
+    public int BestNinjaScore { get; set; }
 
     // A missing or unreadable file just means starting fresh.
     public static AppState Load()

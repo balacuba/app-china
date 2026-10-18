@@ -137,6 +137,11 @@ public sealed partial class Form1 : Form
     private int _practiceDurationSeconds = 10;
     private int _correctAnswerCount;
     private int _wrongAnswerCount;
+    // "Ninja phi tiêu" mini game on the practice page.
+    private readonly NinjaGame _ninjaGame = new();
+    private readonly List<Control> _practiceModeControls = [];
+    private bool _ninjaMode;
+    private Action<int>? _selectPracticeMode;
     private long _advanceAt;
     private long _pausedAdvanceRemaining;
     private bool _showingMeaning;
@@ -302,6 +307,7 @@ public sealed partial class Form1 : Form
         var appState = AppState.Load();
         _correctAnswerCount = Math.Max(0, appState.CorrectAnswers);
         _wrongAnswerCount = Math.Max(0, appState.WrongAnswers);
+        _ninjaGame.BestScore = Math.Max(0, appState.BestNinjaScore);
         UpdatePracticeScore();
         RefreshVocabulary();
         RefreshStudyWords();
@@ -310,7 +316,8 @@ public sealed partial class Form1 : Form
         {
             UserName = _userName,
             CorrectAnswers = _correctAnswerCount,
-            WrongAnswers = _wrongAnswerCount
+            WrongAnswers = _wrongAnswerCount,
+            BestNinjaScore = _ninjaGame.BestScore
         }.Save();
     }
 
@@ -1632,6 +1639,65 @@ public sealed partial class Form1 : Form
         string.Concat(value.Where(character =>
             !char.IsWhiteSpace(character) && !char.IsPunctuation(character) && !char.IsSymbol(character)));
 
+    // Switches the practice page between typing questions and the ninja game.
+    private void SetNinjaMode(bool on)
+    {
+        if (_ninjaMode == on)
+        {
+            return;
+        }
+
+        _ninjaMode = on;
+        _practiceModeControls.ForEach(control => control.Visible = !on);
+        _ninjaGame.Visible = on;
+        _ninjaGame.Stop();
+        UpdatePracticeTitle();
+        if (on)
+        {
+            _practiceTimer.Stop();
+            _questionStopwatch.Stop();
+        }
+        else
+        {
+            StartPracticeWithWords(PracticeWords.ToList());
+        }
+    }
+
+    // A word the ninja cuts down counts as typed right; one that lands as missed, just
+    // like typing practice (score, missed list, HSK progress).
+    private void RecordNinjaResult(VocabularyWord word, bool hit)
+    {
+        if (hit)
+        {
+            _correctAnswerCount++;
+            _incorrectWordCounts.Remove(word.Chinese);
+            _typedCorrectWords.Add(word.Chinese);
+            SpeakTypedChinese(word.Chinese);
+        }
+        else
+        {
+            _wrongAnswerCount++;
+            _incorrectWordCounts[word.Chinese] = _incorrectWordCounts.GetValueOrDefault(word.Chinese) + 1;
+            _typedCorrectWords.Remove(word.Chinese);
+        }
+
+        UpdatePracticeScore();
+    }
+
+    private void UpdatePracticeTitle()
+    {
+        if (_practiceTitle is null)
+        {
+            return;
+        }
+
+        _practiceTitle.Text = _ninjaMode
+            ? "⚔ Ninja phi tiêu: gõ chữ đang rơi để ninja phóng phi tiêu"
+            : _practiceExampleMode
+                ? "Nhìn câu tiếng Việt, gõ lại câu ví dụ tiếng Trung"
+                : "Nhìn nghĩa tiếng Việt và tiếng Anh, gõ từ tiếng Trung";
+    }
+
     private void SetPracticeExampleMode(bool exampleMode)
     {
         if (_practiceExampleMode == exampleMode)
@@ -1640,12 +1706,7 @@ public sealed partial class Form1 : Form
         }
 
         _practiceExampleMode = exampleMode;
-        if (_practiceTitle is not null)
-        {
-            _practiceTitle.Text = exampleMode
-                ? "Nhìn câu tiếng Việt, gõ lại câu ví dụ tiếng Trung"
-                : "Nhìn nghĩa tiếng Việt và tiếng Anh, gõ từ tiếng Trung";
-        }
+        UpdatePracticeTitle();
 
         _practiceMeaning.Font = new Font("Segoe UI", exampleMode ? 18F : 24F, FontStyle.Bold);
         _answerFrame.Anchor = exampleMode ? AnchorStyles.Left | AnchorStyles.Right : AnchorStyles.None;
@@ -2177,7 +2238,7 @@ public sealed partial class Form1 : Form
             WrapContents = false
         };
         // Mode picker: a rounded button (same look as the others) that opens a menu.
-        string[] practiceModes = ["Gõ từ vựng", "Gõ câu ví dụ"];
+        string[] practiceModes = ["Gõ từ vựng", "Gõ câu ví dụ", "⚔ Ninja phi tiêu"];
         var practiceModeBox = new RoundedButton();
         StyleButton(practiceModeBox, ButtonKind.Secondary);
         Action<int>? checkPracticeMode = null;
@@ -2185,10 +2246,15 @@ public sealed partial class Form1 : Form
         {
             practiceModeBox.Text = $"{practiceModes[index]}  ▾";
             checkPracticeMode?.Invoke(index);
-            SetPracticeExampleMode(index == 1);
+            SetNinjaMode(index == 2);
+            if (index != 2)
+            {
+                SetPracticeExampleMode(index == 1);
+            }
         }
 
         checkPracticeMode = AttachRoundedMenu(practiceModeBox, practiceModes, SelectPracticeMode);
+        _selectPracticeMode = SelectPracticeMode;
         SelectPracticeMode(0);
         practiceActions.Controls.AddRange([continueStudyButton, _pausePracticeButton, _skipPracticeButton]);
         _practiceClock.Dock = DockStyle.Fill;
@@ -2251,6 +2317,18 @@ public sealed partial class Form1 : Form
         layout.Controls.Add(_practiceClock, 0, 5);
         layout.Controls.Add(_practiceFeedback, 0, 8);
         layout.Controls.Add(_practiceHint, 0, 9);
+        // The ninja game takes over every row below the top bar when picked.
+        _practiceModeControls.AddRange([_practiceMeaning, _practiceEnglishMeaning, _answerFrame, practiceActions, _practiceClock, _practiceFeedback, _practiceHint]);
+        _ninjaGame.Dock = DockStyle.Fill;
+        _ninjaGame.Visible = false;
+        _ninjaGame.Words = () => PracticeWords
+            .Where(word => !string.IsNullOrWhiteSpace(word.Chinese) && !string.IsNullOrWhiteSpace(word.Pinyin))
+            .Select(word => new GameWord(word.Chinese, word.Pinyin, word))
+            .ToList();
+        _ninjaGame.Hit = word => RecordNinjaResult((VocabularyWord)word.Tag, hit: true);
+        _ninjaGame.Landed = word => RecordNinjaResult((VocabularyWord)word.Tag, hit: false);
+        layout.Controls.Add(_ninjaGame, 0, 1);
+        layout.SetRowSpan(_ninjaGame, 9);
         page.Padding = new Padding(20);
         page.Controls.Add(CreateCard(layout, new Padding(8)));
         return page;
@@ -3431,7 +3509,7 @@ public sealed partial class Form1 : Form
     }
 
     // Lowercases and drops tone marks, spaces and apostrophes; ü and a typed "v" both become u.
-    private static string NormalizePinyin(string text)
+    internal static string NormalizePinyin(string text)
     {
         var builder = new StringBuilder(text.Length);
         foreach (var c in text.Normalize(NormalizationForm.FormD))
@@ -5622,7 +5700,7 @@ public sealed partial class Form1 : Form
         _answerChecked = false;
         _answerBox.Clear();
         _questionStopwatch.Restart();
-        if (_tabs?.SelectedTab == _practicePage)
+        if (_tabs?.SelectedTab == _practicePage && !_ninjaMode)
         {
             _practiceTimer.Start();
         }
@@ -6158,6 +6236,14 @@ public sealed partial class Form1 : Form
 
     private void PracticeTimer_Tick(object? sender, EventArgs e)
     {
+        // The ninja game has its own clock; typing questions must not time out meanwhile.
+        if (_ninjaMode)
+        {
+            _practiceTimer.Stop();
+            _questionStopwatch.Stop();
+            return;
+        }
+
         if (_practicePaused)
         {
             return;
@@ -6220,6 +6306,12 @@ public sealed partial class Form1 : Form
 
     private void PracticeTab_SelectedIndexChanged(object? sender, EventArgs e)
     {
+        if (_ninjaMode)
+        {
+            _ninjaGame.SetActive(_tabs?.SelectedTab == _practicePage);
+            return;
+        }
+
         if (_tabs?.SelectedTab == _practicePage)
         {
             if (_practicePaused)
