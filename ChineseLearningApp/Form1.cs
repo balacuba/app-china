@@ -419,17 +419,14 @@ public sealed partial class Form1 : Form
         menuButton.Size = new Size(230, 40);
         menuButton.Anchor = AnchorStyles.Left;
         menuButton.Margin = Padding.Empty;
-        string[] pageIcons = ["🏠", "📚", "🃏", "⌨", "⚙"];
-        var pageLabels = tabs.TabPages.Cast<TabPage>()
-            .Select((page, index) => $"{pageIcons[index % pageIcons.Length]}  {page.Text}")
-            .ToList();
-        var checkPage = AttachRoundedMenu(menuButton, pageLabels, index => tabs.SelectedIndex = index);
+        // The menu only leads back to Home (page 0); Home's cards open the other pages.
+        var checkPage = AttachRoundedMenu(menuButton, [$"🏠  {tabs.TabPages[0].Text}"], _ => tabs.SelectedIndex = 0);
         void SyncMenuButton()
         {
             // SelectedTab is still null before the control has a handle.
             var index = Math.Max(0, tabs.SelectedIndex);
             menuButton.Text = $"☰   {tabs.TabPages[index].Text}   ▾";
-            checkPage(index);
+            checkPage(index == 0 ? 0 : -1);
         }
 
         tabs.SelectedIndexChanged += (_, _) => SyncMenuButton();
