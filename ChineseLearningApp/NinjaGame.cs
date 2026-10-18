@@ -1125,13 +1125,15 @@ internal sealed class NinjaGame : Panel
     }
 
     // A small meteor in orbit: where it is, how big, which way it is heading (a unit
-    // vector) and whether it is on the near side of the word.
-    private readonly record struct Fragment(float X, float Y, float Size, float Dx, float Dy, bool Front);
+    // vector), whether it is on the near side of the word, and how bright it still
+    // is (1 just broken off, 0 burnt out).
+    private readonly record struct Fragment(float X, float Y, float Size, float Dx, float Dy, bool Front, float Glow);
 
-    // A swarm of small meteors circling the word as it falls, each on its own tilted
-    // oval at its own pace. On the near side they sweep from left to right, then
-    // loop round behind the word and come back. They fly with it all the way down
-    // and share its fate: they blow up with it, or crash with it.
+    // Small meteors keep breaking off the big one. Each starts at the edge of the
+    // blaze, spirals outwards round the word on its own tilted oval (sweeping left
+    // to right on the near side, passing behind on the far side), shrinking and
+    // fading until it burns out, and then another breaks off in its place. Those
+    // still burning share the word's fate: they blow up with it, or crash with it.
     private IEnumerable<Fragment> Fragments(FallingWord falling)
     {
         var radius = MeteorRadius(falling);
@@ -1142,10 +1144,14 @@ internal sealed class NinjaGame : Panel
         {
             var hash = MathF.Abs(MathF.Sin(seed * 12.9898f + index * 78.233f)) * 43758.5453f % 1f;
             var hash2 = MathF.Abs(MathF.Sin(seed * 39.3468f + index * 11.135f)) * 24634.6345f % 1f;
-            var across = radius * (1.4f + 1.4f * hash2);
-            var depth = radius * (0.35f + 0.35f * hash);
+            // How far through its life this one is: each lasts about 2–4 seconds,
+            // and they are staggered so some are always breaking off.
+            var life = (time / (2f + 2f * hash) + index / (float)count + hash2) % 1f;
+            var spread = 0.7f + 0.6f * MathF.Sqrt(life);
+            var across = radius * (1.4f + 1.4f * hash2) * spread;
+            var depth = radius * (0.35f + 0.35f * hash) * spread;
             var tilt = (hash - 0.5f) * 0.6f;
-            var lift = radius * (0.2f + 1.2f * hash2);
+            var lift = radius * (0.2f + 1.2f * hash2) * spread;
             var spin = 1.1f + 0.9f * hash;
             // The angle runs backwards so the near (lower) half moves left to right.
             var angle = -time * spin + index * 2.399f + seed;
@@ -1156,16 +1162,23 @@ internal sealed class NinjaGame : Panel
             var dx = sin * across;
             var dy = -cos * depth + sin * across * tilt;
             var speed = MathF.Max(0.001f, MathF.Sqrt(dx * dx + dy * dy));
-            var size = (2f + 2.6f * hash) * Scale * (sin > 0 ? 1 : 0.75f);
-            yield return new Fragment(x, y, size, dx / speed, dy / speed, sin > 0);
+            // Flares up as it breaks off, then dims and shrinks away.
+            var glow = Math.Min(1, life * 8) * (1 - life * life);
+            var size = (2f + 2.6f * hash) * Scale * (sin > 0 ? 1 : 0.75f) * (1 - 0.5f * life);
+            yield return new Fragment(x, y, size, dx / speed, dy / speed, sin > 0, glow);
         }
     }
 
-    // Every fragment of a meteor bursts in its own small blast.
+    // Every small meteor still burning bursts in its own small blast.
     private void ExplodeFragments(FallingWord falling, bool ground)
     {
-        foreach (var (x, flyingY, size, _, _, _) in Fragments(falling))
+        foreach (var (x, flyingY, size, _, _, _, glow) in Fragments(falling))
         {
+            if (glow < 0.15f)
+            {
+                continue;
+            }
+
             // On a crash they come down on the roof alongside the big one.
             var y = ground ? Sky.Bottom - RoofHeight : flyingY;
             _explosions.Add(new Explosion(x, y, size * 5, ground));
@@ -1216,7 +1229,13 @@ internal sealed class NinjaGame : Panel
     // the streak fades to orange and then to nothing.
     private static void DrawFragment(Graphics graphics, Fragment fragment)
     {
-        var (x, y, size, _, _, _) = fragment;
+        var (x, y, size, _, _, _, glow) = fragment;
+        if (glow < 0.02f)
+        {
+            return;
+        }
+
+        int Fade(int alpha) => (int)(alpha * glow);
         var length = size * 9 + 16;
         var backX = 0f;
         var backY = -1f;
@@ -1230,15 +1249,15 @@ internal sealed class NinjaGame : Panel
             {
                 InterpolationColors = new ColorBlend
                 {
-                    Colors = [Color.FromArgb(0, 249, 115, 22), Color.FromArgb(150, 253, 224, 71), Color.FromArgb(235, 255, 251, 220)],
+                    Colors = [Color.FromArgb(0, 249, 115, 22), Color.FromArgb(Fade(150), 253, 224, 71), Color.FromArgb(Fade(235), 255, 251, 220)],
                     Positions = [0f, 0.6f, 1f]
                 }
             };
             graphics.FillPath(brush, streak);
         }
 
-        FireDisc(graphics, x, y, size * 3, Color.FromArgb(150, 251, 191, 36));
-        using var head = new SolidBrush(Color.FromArgb(255, 255, 252, 240));
+        FireDisc(graphics, x, y, size * 3, Color.FromArgb(Fade(150), 251, 191, 36));
+        using var head = new SolidBrush(Color.FromArgb(Fade(255), 255, 252, 240));
         graphics.FillEllipse(head, x - size, y - size, size * 2, size * 2);
     }
 
