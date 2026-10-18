@@ -83,9 +83,9 @@ public sealed partial class Form1 : Form
     private readonly Label _practiceTimerLabel = new();
     private readonly Label _practiceScoreLabel = new();
     private readonly Label _practiceHint = new();
-    private readonly Button _reviewIncorrectWordsButton = new();
-    private readonly Button _pausePracticeButton = new();
-    private readonly Button _skipPracticeButton = new();
+    private readonly RoundedButton _reviewIncorrectWordsButton = new();
+    private readonly RoundedButton _pausePracticeButton = new();
+    private readonly RoundedButton _skipPracticeButton = new();
     private string _lastAnswerText = string.Empty;
     private bool _typingSpeechFailed;
     private readonly TextBox _answerBox = new();
@@ -2555,6 +2555,14 @@ public sealed partial class Form1 : Form
     // Example and grammar cells draw the row's vocabulary word in red.
     private void VocabularyGrid_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
     {
+        if (e.RowIndex >= 0 &&
+            e.ColumnIndex >= 0 &&
+            _grid.Columns[e.ColumnIndex].DataPropertyName == nameof(VocabularyWord.IsSelected))
+        {
+            PaintRoundedCheckBox(e);
+            return;
+        }
+
         if (e.RowIndex < 0 ||
             e.ColumnIndex < 0 ||
             e.CellStyle is null ||
@@ -2583,6 +2591,59 @@ public sealed partial class Form1 : Form
             Math.Max(1, e.CellBounds.Width - e.CellStyle.Padding.Horizontal),
             Math.Max(1, e.CellBounds.Height - e.CellStyle.Padding.Vertical - 1));
         DrawHighlightedSegments(e.Graphics!, segments, e.CellStyle.Font ?? _grid.Font, bounds, normalColor, centerVertically: true);
+        e.Handled = true;
+    }
+
+    // The "Học" tick boxes are drawn as rounded squares: accent fill with a white
+    // tick when checked, a light outline when not.
+    private static void PaintRoundedCheckBox(DataGridViewCellPaintingEventArgs e)
+    {
+        e.Paint(e.CellBounds, DataGridViewPaintParts.All & ~DataGridViewPaintParts.ContentForeground);
+        var isChecked = e.FormattedValue is true || (e.Value is bool value && value);
+        const int size = 20;
+        var box = new RectangleF(
+            e.CellBounds.Left + (e.CellBounds.Width - size) / 2F,
+            e.CellBounds.Top + (e.CellBounds.Height - size) / 2F,
+            size,
+            size);
+        var graphics = e.Graphics!;
+        var smoothing = graphics.SmoothingMode;
+        graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        using (var path = new System.Drawing.Drawing2D.GraphicsPath())
+        {
+            const float diameter = 10F;
+            path.AddArc(box.Left, box.Top, diameter, diameter, 180, 90);
+            path.AddArc(box.Right - diameter, box.Top, diameter, diameter, 270, 90);
+            path.AddArc(box.Right - diameter, box.Bottom - diameter, diameter, diameter, 0, 90);
+            path.AddArc(box.Left, box.Bottom - diameter, diameter, diameter, 90, 90);
+            path.CloseFigure();
+            if (isChecked)
+            {
+                using var fill = new SolidBrush(Accent);
+                graphics.FillPath(fill, path);
+                using var tick = new Pen(Color.White, 2.4F)
+                {
+                    StartCap = System.Drawing.Drawing2D.LineCap.Round,
+                    EndCap = System.Drawing.Drawing2D.LineCap.Round,
+                    LineJoin = System.Drawing.Drawing2D.LineJoin.Round
+                };
+                graphics.DrawLines(tick,
+                [
+                    new PointF(box.Left + 5F, box.Top + 10.5F),
+                    new PointF(box.Left + 8.5F, box.Top + 14F),
+                    new PointF(box.Left + 15F, box.Top + 6.5F)
+                ]);
+            }
+            else
+            {
+                using var fill = new SolidBrush(SurfaceColor);
+                graphics.FillPath(fill, path);
+                using var outline = new Pen(Color.FromArgb(148, 163, 184), 1.5F);
+                graphics.DrawPath(outline, path);
+            }
+        }
+
+        graphics.SmoothingMode = smoothing;
         e.Handled = true;
     }
 
@@ -2650,6 +2711,100 @@ public sealed partial class Form1 : Form
         }
 
         graphics.Clip = clip;
+    }
+
+    // A flat button drawn with anti-aliased rounded corners; colours come from
+    // BackColor and FlatAppearance (hover/pressed), as set by StyleButton.
+    private sealed class RoundedButton : Button
+    {
+        private const int Radius = 10;
+        private bool _hovered;
+        private bool _pressed;
+
+        public RoundedButton()
+        {
+            SetStyle(
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw |
+                ControlStyles.UserPaint,
+                true);
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            _hovered = true;
+            Invalidate();
+            base.OnMouseEnter(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            _hovered = false;
+            _pressed = false;
+            Invalidate();
+            base.OnMouseLeave(e);
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            _pressed = e.Button == MouseButtons.Left;
+            Invalidate();
+            base.OnMouseDown(e);
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            _pressed = false;
+            Invalidate();
+            base.OnMouseUp(e);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var graphics = e.Graphics;
+            graphics.Clear(Parent?.BackColor ?? SystemColors.Control);
+            graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            var fill = !Enabled
+                ? Color.FromArgb(241, 245, 249)
+                : _pressed
+                    ? FlatAppearance.MouseDownBackColor
+                    : _hovered
+                        ? FlatAppearance.MouseOverBackColor
+                        : BackColor;
+            var bounds = new RectangleF(0.5F, 0.5F, Width - 1.5F, Height - 1.5F);
+            using (var path = CreateRoundedPath(bounds, Math.Min(Radius, (int)(Height / 2F))))
+            using (var brush = new SolidBrush(fill.IsEmpty ? BackColor : fill))
+            {
+                graphics.FillPath(brush, path);
+                if (Focused && ShowFocusCues)
+                {
+                    using var focusPen = new Pen(Color.FromArgb(147, 197, 253), 2F);
+                    graphics.DrawPath(focusPen, path);
+                }
+            }
+
+            TextRenderer.DrawText(
+                graphics,
+                Text,
+                Font,
+                ClientRectangle,
+                Enabled ? ForeColor : Color.FromArgb(148, 163, 184),
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+                TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+        }
+
+        private static System.Drawing.Drawing2D.GraphicsPath CreateRoundedPath(RectangleF bounds, int radius)
+        {
+            var diameter = radius * 2F;
+            var path = new System.Drawing.Drawing2D.GraphicsPath();
+            path.AddArc(bounds.Left, bounds.Top, diameter, diameter, 180, 90);
+            path.AddArc(bounds.Right - diameter, bounds.Top, diameter, diameter, 270, 90);
+            path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
+            path.AddArc(bounds.Left, bounds.Bottom - diameter, diameter, diameter, 90, 90);
+            path.CloseFigure();
+            return path;
+        }
     }
 
     // A label that draws the given Chinese keys in red (plain Label when there are none).
@@ -3799,7 +3954,7 @@ public sealed partial class Form1 : Form
         bool secondary = false,
         bool danger = false)
     {
-        var button = new Button { Text = text, Margin = new Padding(0, 0, 10, 0) };
+        var button = new RoundedButton { Text = text, Margin = new Padding(0, 0, 10, 0) };
         StyleButton(button, danger ? ButtonKind.Danger : secondary ? ButtonKind.Secondary : ButtonKind.Primary);
         button.Click += onClick;
         return button;
