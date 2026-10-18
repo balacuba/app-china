@@ -33,6 +33,8 @@ public sealed partial class Form1 : Form
         "practice-settings.json");
     private readonly Dictionary<string, bool> _columnVisibility = new(StringComparer.Ordinal);
     private readonly List<string> _columnOrder = new();
+    private readonly Dictionary<string, int> _baseColumnWidths = new(StringComparer.Ordinal);
+    private bool _fittingColumns;
     private readonly Dictionary<string, HashSet<string>> _columnFilters = new(StringComparer.Ordinal);
     private readonly BindingList<VocabularyWord> _words = new();
     private readonly BindingList<VocabularyWord> _visibleWords = new();
@@ -91,9 +93,14 @@ public sealed partial class Form1 : Form
     {
         InitializeComponent();
         Text = $"Cùng học tiếng trung nhé '{userName}'";
+        // Open at ~85% of the current screen's working area so the window suits
+        // both small laptops and large monitors.
+        var workingArea = Screen.FromPoint(Cursor.Position).WorkingArea;
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(760, 560);
-        Size = new Size(1000, 720);
+        MinimumSize = new Size(Math.Min(760, workingArea.Width), Math.Min(560, workingArea.Height));
+        Size = new Size(
+            Math.Clamp((int)(workingArea.Width * 0.85), MinimumSize.Width, workingArea.Width),
+            Math.Clamp((int)(workingArea.Height * 0.85), MinimumSize.Height, workingArea.Height));
         BackColor = PageColor;
         Font = new Font("Segoe UI", 10F);
 
@@ -197,7 +204,58 @@ public sealed partial class Form1 : Form
             var typical = values[(int)((values.Count - 1) * 0.95)];
             var contentWidth = TextRenderer.MeasureText(typical, cellFont).Width + cellPadding;
             var headerWidth = TextRenderer.MeasureText(column.HeaderText, headerFont).Width + 20;
-            column.Width = Math.Clamp(Math.Max(contentWidth, headerWidth), 60, maxWidth);
+            _baseColumnWidths[column.Name] = Math.Clamp(Math.Max(contentWidth, headerWidth), 60, maxWidth);
+        }
+
+        FitColumnsToGrid();
+    }
+
+    // On a wide screen the text columns stretch in proportion to fill the grid;
+    // on a narrow one they keep their base width and the grid scrolls sideways.
+    private void FitColumnsToGrid()
+    {
+        if (_baseColumnWidths.Count == 0 || _grid.ClientSize.Width <= 0)
+        {
+            return;
+        }
+
+        var columns = _grid.Columns.Cast<DataGridViewColumn>()
+            .Where(column => column.Visible && _baseColumnWidths.ContainsKey(column.Name))
+            .ToList();
+        var fixedWidth = _grid.Columns.Cast<DataGridViewColumn>()
+            .Where(column => column.Visible && !_baseColumnWidths.ContainsKey(column.Name))
+            .Sum(column => column.Width);
+        var scrollBarWidth = _grid.Controls.OfType<VScrollBar>().Any(bar => bar.Visible)
+            ? SystemInformation.VerticalScrollBarWidth
+            : 0;
+        var available = _grid.ClientSize.Width - fixedWidth - scrollBarWidth - 2;
+        var baseTotal = columns.Sum(column => _baseColumnWidths[column.Name]);
+        if (columns.Count == 0 || baseTotal <= 0)
+        {
+            return;
+        }
+
+        var scale = Math.Max(1.0, (double)available / baseTotal);
+        _fittingColumns = true;
+        try
+        {
+            foreach (var column in columns)
+            {
+                column.Width = (int)(_baseColumnWidths[column.Name] * scale);
+            }
+        }
+        finally
+        {
+            _fittingColumns = false;
+        }
+    }
+
+    private void VocabularyGrid_ColumnWidthChanged(object? sender, DataGridViewColumnEventArgs e)
+    {
+        // A width the user drags becomes that column's new base width.
+        if (!_fittingColumns && _baseColumnWidths.ContainsKey(e.Column.Name))
+        {
+            _baseColumnWidths[e.Column.Name] = e.Column.Width;
         }
     }
 
@@ -301,6 +359,15 @@ public sealed partial class Form1 : Form
         _grid.CellClick += VocabularyGrid_CellClick;
         _grid.CellDoubleClick += VocabularyGrid_CellDoubleClick;
         _grid.CellPainting += VocabularyGrid_CellPainting;
+        _grid.ColumnWidthChanged += VocabularyGrid_ColumnWidthChanged;
+        _grid.Resize += (_, _) => FitColumnsToGrid();
+        _grid.ColumnStateChanged += (_, e) =>
+        {
+            if (e.StateChanged == DataGridViewElementStates.Visible)
+            {
+                FitColumnsToGrid();
+            }
+        };
         _grid.ColumnHeaderMouseClick += VocabularyGrid_ColumnHeaderMouseClick;
         _grid.CellBeginEdit += VocabularyGrid_CellBeginEdit;
         _grid.CellEndEdit += VocabularyGrid_CellEndEdit;
@@ -2669,8 +2736,11 @@ public sealed partial class Form1 : Form
 
     private Size GetFlashcardCardSize()
     {
-        var width = Math.Max(2, Math.Min(620, _flashcardHost.ClientSize.Width - 48));
-        var height = Math.Max(2, Math.Min(300, _flashcardHost.ClientSize.Height - 24));
+        // The card grows with the window (at least 620x300 when there is room).
+        var hostWidth = _flashcardHost.ClientSize.Width;
+        var hostHeight = _flashcardHost.ClientSize.Height;
+        var width = Math.Max(2, Math.Min(hostWidth - 48, Math.Clamp((int)(hostWidth * 0.75), 620, 1100)));
+        var height = Math.Max(2, Math.Min(hostHeight - 24, Math.Clamp((int)(hostHeight * 0.8), 300, 700)));
         return new Size(width, height);
     }
 
