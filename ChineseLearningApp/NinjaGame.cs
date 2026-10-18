@@ -378,6 +378,7 @@ internal sealed class NinjaGame : Panel
                 // Landed on the roof: it blows up and leaves a crater; lose a life and the combo.
                 _words.RemoveAt(index);
                 Explode(falling.CentreX, roofTop, MeteorRadius(falling) * 1.8f, ground: true);
+                ExplodeFragments(falling, ground: true);
                 _craters.Add(new Crater(falling.CentreX));
                 if (_craters.Count > 10)
                 {
@@ -622,6 +623,7 @@ internal sealed class NinjaGame : Panel
         _score += points;
         var centre = new PointF(target.CentreX, target.CentreY);
         Explode(centre.X, centre.Y, MeteorRadius(target) * 1.6f, ground: false);
+        ExplodeFragments(target, ground: false);
         for (var index = 0; index < 12; index++)
         {
             var angle = _random.NextDouble() * Math.PI * 2;
@@ -715,7 +717,8 @@ internal sealed class NinjaGame : Panel
             }
 
             var length = MathF.Max(0.001f, MathF.Sqrt(dx * dx + dy * dy));
-            if (_words.Contains(star.Target) && length < 24)
+            // It blows up the moment the shuriken reaches the edge of the fireball.
+            if (_words.Contains(star.Target) && length < MeteorRadius(star.Target) * 1.15f)
             {
                 _shurikens.RemoveAt(index);
                 HitWord(star.Target);
@@ -931,9 +934,10 @@ internal sealed class NinjaGame : Panel
         }
     }
 
-    // A burning meteor: the word sits inside a ball of fire that trails up behind it,
-    // shedding loose tongues of flame, with two or three small fireballs alongside.
-    // A word already answered hangs still and stops burning.
+    // A blazing meteor: the word sits in a white-hot head with a molten orange edge,
+    // wrapped in a warm glow, dragging a sheaf of fiery blades and burning chips,
+    // with small meteors flying around it.
+    // A word already answered hangs still but keeps burning until the shuriken hits.
     private void DrawMeteor(Graphics graphics, FallingWord falling)
     {
         var centreX = falling.CentreX;
@@ -941,43 +945,221 @@ internal sealed class NinjaGame : Panel
         var radius = MeteorRadius(falling);
         var seed = falling.X * 0.37f;
         var time = (float)_twinkle;
-        if (!falling.Targeted)
+        var length = 120 + radius * 2.7f;
+
+        // Warm haze around the head.
+        FireDisc(graphics, centreX, centreY, radius * 2.5f, Color.FromArgb(85, 249, 115, 22));
+
+        // The trail is a sheaf of sharp blades torn back off the head: long dark
+        // violet and red ones behind, orange in the middle and short bright yellow
+        // ones in front, each flickering in length. A solid orange body holds them.
+        DrawFlame(graphics, centreX, centreY, length * 0.55f, radius * 1.05f, seed + 2, time, Color.FromArgb(234, 88, 12), 220, wobble: 0.3f);
+        const int blades = 39;
+        for (var layer = 0; layer < 3; layer++)
         {
-            // Companions trail a little behind and to the sides, bobbing as they fly.
-            var companions = 2 + (int)(seed * 10) % 2;
-            for (var index = 0; index < companions; index++)
+            for (var index = layer; index < blades; index += 3)
             {
-                var side = index % 2 == 0 ? -1 : 1;
-                var size = 5 + (seed * 7 + index * 3) % 4;
-                var x = centreX + side * (radius + 16 + index * 9) + MathF.Sin(time * 2.2f + seed + index) * 4;
-                var y = centreY - radius * 0.5f - 14 - index * 20 + MathF.Cos(time * 1.7f + seed + index) * 3;
-                DrawFireball(graphics, x, y, size, size * 9, seed + index, time);
+                var hash = MathF.Abs(MathF.Sin(seed * 7.13f + index * 91.7f)) * 1000 % 1f;
+                var hash2 = MathF.Abs(MathF.Sin(seed * 3.71f + index * 47.3f)) * 1000 % 1f;
+                var angle = (hash - 0.5f) * 2.4f;
+                var flicker = 0.85f + 0.15f * MathF.Sin(time * 9 + index * 1.3f);
+                var (bladeLength, baseColor, tipColor, width) = layer switch
+                {
+                    0 => (length * (0.85f + 0.15f * hash2), Color.FromArgb(220, 38, 38), Color.FromArgb(49, 46, 129), radius * 0.32f),
+                    1 => (length * (0.6f + 0.2f * hash2), Color.FromArgb(249, 115, 22), Color.FromArgb(185, 28, 28), radius * 0.26f),
+                    _ => (length * (0.3f + 0.2f * hash2), Color.FromArgb(254, 240, 138), Color.FromArgb(251, 146, 60), radius * 0.2f)
+                };
+                // Every blade leans in towards one apex above the head, so together
+                // they make a cone: the further a blade reaches, the closer to the
+                // middle its tip ends.
+                var baseX = centreX + MathF.Sin(angle) * radius * 0.9f;
+                var apexX = centreX + (hash2 - 0.5f) * radius * 0.25f;
+                DrawBlade(graphics, baseX, centreY - MathF.Cos(angle) * radius * 0.5f,
+                    (apexX - baseX) / length, bladeLength * flicker, width * (0.6f + 0.6f * hash), baseColor, tipColor);
+            }
+        }
+
+        // Burning chips break off and tumble up along the trail.
+        for (var index = 0; index < 10; index++)
+        {
+            var hash = MathF.Abs(MathF.Sin(seed * 5.3f + index * 63.1f)) * 1000 % 1f;
+            var t = (time * (0.5f + 0.4f * hash) + hash * 3) % 1f;
+            var chipX = centreX + (hash - 0.5f) * radius * 3f * (0.6f + t) + MathF.Sin(time * 3 + index) * 4;
+            var chipY = centreY - radius * 0.8f - t * length;
+            var chip = 2 + 3 * hash;
+            var spin = time * 6 + index;
+            using var brush = new SolidBrush(Color.FromArgb((int)(230 * (1 - t)), index % 3 == 0 ? Color.FromArgb(253, 186, 116) : Color.FromArgb(68, 40, 30)));
+            graphics.FillPolygon(brush,
+            [
+                new PointF(chipX + MathF.Cos(spin) * chip, chipY + MathF.Sin(spin) * chip),
+                new PointF(chipX + MathF.Cos(spin + 2.2f) * chip * 0.7f, chipY + MathF.Sin(spin + 2.2f) * chip * 0.7f),
+                new PointF(chipX + MathF.Cos(spin + 4f) * chip, chipY + MathF.Sin(spin + 4f) * chip)
+            ]);
+        }
+
+        foreach (var (x, y, size) in Fragments(falling))
+        {
+            DrawFragment(graphics, x, y, size, size * 12 + 22);
+        }
+
+        // The head: no smooth ball but a ragged blaze. A ring of red-orange flame
+        // licks out all round it, then the white-hot middle, whose hottest point is
+        // pushed up into the trail while its rough edge burns molten orange. Both
+        // outlines flicker, and their flames reach further on the upper side.
+        var headRadius = radius * 1.05f;
+        FireDisc(graphics, centreX, centreY + radius * 0.15f, headRadius * 1.5f, Color.FromArgb(190, 249, 115, 22));
+        using (var outer = RaggedBlaze(centreX, centreY, headRadius * 1.22f, 0.75f, seed + 3, time))
+        using (var flame = new SolidBrush(Color.FromArgb(235, 234, 88, 12)))
+        {
+            graphics.FillPath(flame, outer);
+        }
+
+        using var headPath = RaggedBlaze(centreX, centreY, headRadius, 0.4f, seed, time);
+        using var burn = new PathGradientBrush(headPath)
+        {
+            CenterPoint = new PointF(centreX, centreY - headRadius * 0.45f),
+            CenterColor = Color.FromArgb(255, 253, 245),
+            SurroundColors = [Color.FromArgb(245, 251, 146, 60)],
+            FocusScales = new PointF(0.55f, 0.55f)
+        };
+        graphics.FillPath(burn, headPath);
+    }
+
+    // A rough, flickering outline of flame round a centre: points alternate between
+    // hollows on the rim and tongue tips. Every tongue is swept up towards the trail,
+    // as if the fall blows the fire back: its tip leans only a little outwards and
+    // mostly upwards. Tongues waver with time and are longest on the sides and top,
+    // shortest on the leading (lower) edge.
+    private static GraphicsPath RaggedBlaze(float centreX, float centreY, float radius, float roughness, float seed, float time)
+    {
+        const int points = 36;
+        var outline = new PointF[points];
+        for (var index = 0; index < points; index++)
+        {
+            var angle = index * MathF.PI * 2 / points;
+            var cos = MathF.Cos(angle);
+            var sin = MathF.Sin(angle);
+            var hash = MathF.Abs(MathF.Sin(seed * 9.1f + index * 37.7f)) * 1000 % 1f;
+            var wave = 1 + 0.04f * MathF.Sin(angle * 3 + time * 7 + seed);
+            if (index % 2 == 1)
+            {
+                var hollow = radius * (1 - roughness * (0.2f + 0.3f * hash)) * wave;
+                outline[index] = new PointF(centreX + cos * hollow, centreY + sin * hollow);
+                continue;
             }
 
-            // Loose tongues of fire peel off the sides and drift up, fading out.
-            var length = 110 + radius * 3f;
-            for (var index = 0; index < 5; index++)
-            {
-                var t = (time * 0.7f + index / 5f + seed) % 1f;
-                var side = index % 2 == 0 ? -1 : 1;
-                var tongueX = centreX + side * radius * (0.75f + 0.5f * t) + MathF.Sin(time * 4 + index) * 3;
-                var tongueY = centreY - radius * 1.1f - t * length * 0.8f;
-                // Orange only: faint yellow over the night sky turns a muddy green.
-                var color = index % 2 == 0 ? Color.FromArgb(251, 146, 60) : Color.FromArgb(249, 115, 22);
-                DrawFlame(graphics, tongueX, tongueY, radius * 1.3f, radius * 0.16f, seed + index * 3, time, color, (int)(240 * (1 - t) * (1 - t)));
-            }
+            var down = MathF.Max(0, sin);
+            var flicker = 0.65f + 0.35f * MathF.Sin(time * 11 + index * 1.9f + seed);
+            var tongue = radius * roughness * (0.5f + 1.3f * hash) * flicker * (1.3f - 1.05f * down) * 2.2f;
+            var baseX = centreX + cos * radius * wave;
+            var baseY = centreY + sin * radius * wave;
+            outline[index] = new PointF(baseX + cos * tongue * 0.3f, baseY + sin * tongue * 0.3f - tongue);
+        }
 
-            DrawFireball(graphics, centreX, centreY, radius, length, seed, time);
+        // A low-tension curve keeps the tongues pointed but softens them like fire.
+        // Winding fill keeps tongues that cross their neighbours solid.
+        var path = new GraphicsPath(FillMode.Winding);
+        path.AddClosedCurve(outline, 0.3f);
+        return path;
+    }
+
+    // A meteor shower around the word: tiny burning fragments that fly with it all
+    // the way down, each in its own spot beside or behind it and weaving a little.
+    // They share the word's fate: they blow up with it, or crash with it.
+    private IEnumerable<(float X, float Y, float Size)> Fragments(FallingWord falling)
+    {
+        var radius = MeteorRadius(falling);
+        var seed = falling.X * 0.37f;
+        var time = (float)_twinkle;
+        var count = 9 + (int)(seed * 10) % 4;
+        for (var index = 0; index < count; index++)
+        {
+            var hash = MathF.Abs(MathF.Sin(seed * 12.9898f + index * 78.233f)) * 43758.5453f % 1f;
+            var hash2 = MathF.Abs(MathF.Sin(seed * 39.3468f + index * 11.135f)) * 24634.6345f % 1f;
+            var side = index % 2 == 0 ? -1 : 1;
+            var weave = time * (1.2f + hash) + index * 1.7f + seed;
+            // Scattered all round the head and along the trail, outside the head itself,
+            // each circling its spot so the swarm looks alive.
+            var x = falling.CentreX + side * radius * (1.25f + 1.6f * hash2) + MathF.Sin(weave) * 9;
+            var y = falling.CentreY - radius * (3.2f * hash - 0.7f) + MathF.Cos(weave * 0.8f) * 9;
+            yield return (x, y, 2f + 2.6f * hash);
         }
     }
 
-    // The fire around a meteor, in cartoon layers: a big orange flame, a yellow one
-    // inside it, and a pale hot core right around the word.
-    private static void DrawFireball(Graphics graphics, float centreX, float centreY, float radius, float length, float seed, float time)
+    // Every fragment of a meteor bursts in its own small blast.
+    private void ExplodeFragments(FallingWord falling, bool ground)
     {
-        DrawFlame(graphics, centreX, centreY, length, radius * 1.3f, seed, time, Color.FromArgb(249, 115, 22), 245);
-        DrawFlame(graphics, centreX, centreY, length * 0.72f, radius * 1.1f, seed + 2, time, Color.FromArgb(251, 191, 36), 255);
-        DrawFlame(graphics, centreX, centreY, length * 0.4f, radius * 0.92f, seed + 4, time, Color.FromArgb(254, 240, 138), 255);
+        foreach (var (x, flyingY, size) in Fragments(falling))
+        {
+            // On a crash they come down on the roof alongside the big one.
+            var y = ground ? Sky.Bottom - RoofHeight : flyingY;
+            _explosions.Add(new Explosion(x, y, size * 5, ground));
+            for (var index = 0; index < 4; index++)
+            {
+                var angle = _random.NextDouble() * Math.PI * 2;
+                var power = 60 + _random.NextDouble() * 140;
+                _particles.Add(new Particle(x, y, (float)(Math.Cos(angle) * power), (float)(Math.Sin(angle) * power - 40), Color.FromArgb(251, 146, 60)));
+            }
+        }
+    }
+
+    // One blade of the trail: a long thin needle from the head up to a sharp tip,
+    // leaning by `lean` (sideways per unit up), shading from its base colour to its
+    // tip colour. It narrows fast and then runs out into a long fine point, which
+    // stays visible right to the end so the tip reads sharp.
+    private static void DrawBlade(Graphics graphics, float x, float y, float lean, float length, float width, Color baseColor, Color tipColor)
+    {
+        var tip = new PointF(x + lean * length, y - length);
+        var dx = tip.X - x;
+        var dy = tip.Y - y;
+        var size = MathF.Max(0.001f, MathF.Sqrt(dx * dx + dy * dy));
+        var normal = new PointF(-dy / size * width / 2, dx / size * width / 2);
+        PointF Along(float t, float side, float scale) => new(x + dx * t + side * normal.X * scale, y + dy * t + side * normal.Y * scale);
+        PointF[] blade =
+        [
+            Along(0, -1, 1),
+            Along(0.15f, -1, 0.85f),
+            Along(0.5f, -1, 0.3f),
+            tip,
+            Along(0.5f, 1, 0.3f),
+            Along(0.15f, 1, 0.85f),
+            Along(0, 1, 1)
+        ];
+        using var brush = new LinearGradientBrush(new PointF(x, y + 1), tip, baseColor, tipColor)
+        {
+            InterpolationColors = new ColorBlend
+            {
+                Colors = [Color.FromArgb(245, baseColor), Color.FromArgb(225, tipColor), Color.FromArgb(110, tipColor)],
+                Positions = [0f, 0.7f, 1f]
+            }
+        };
+        graphics.FillPolygon(brush, blade);
+    }
+
+    // One small meteor: a white-hot head in a warm glow, trailing a thin yellow streak
+    // straight up that fades to orange and then to nothing.
+    private static void DrawFragment(Graphics graphics, float x, float y, float size, float length)
+    {
+        using (var streak = new GraphicsPath())
+        {
+            streak.AddLine(x - size * 0.9f, y, x, y - length);
+            streak.AddLine(x, y - length, x + size * 0.9f, y);
+            streak.CloseFigure();
+            var bounds = new RectangleF(x - size, y - length - 1, size * 2, length + 2);
+            using var brush = new LinearGradientBrush(bounds, Color.White, Color.White, LinearGradientMode.Vertical)
+            {
+                InterpolationColors = new ColorBlend
+                {
+                    Colors = [Color.FromArgb(0, 249, 115, 22), Color.FromArgb(150, 253, 224, 71), Color.FromArgb(235, 255, 251, 220)],
+                    Positions = [0f, 0.6f, 1f]
+                }
+            };
+            graphics.FillPath(brush, streak);
+        }
+
+        FireDisc(graphics, x, y, size * 3, Color.FromArgb(150, 251, 191, 36));
+        using var head = new SolidBrush(Color.FromArgb(255, 255, 252, 240));
+        graphics.FillEllipse(head, x - size, y - size, size * 2, size * 2);
     }
 
     // Big enough for the fire to hold the whole word.
@@ -1048,25 +1230,69 @@ internal sealed class NinjaGame : Panel
     // One flame layer: a teardrop whose round bottom wraps under the word and whose
     // sides taper up to a tip, rippling with time so the fire licks and flickers.
     // Solid around the word, fading out towards the tip.
-    private static void DrawFlame(Graphics graphics, float centreX, float head, float length, float half, float seed, float time, Color color, int alpha)
+    // `wobble` scales how much it ripples and sways: 1 for licking flames, less for
+    // a smoother trail. `jagged` (0–1) cuts the sides into sawtooth barbs: each tooth
+    // ramps from inside out and up to a sharp point, then snaps back in, so the fire
+    // looks swept back. The teeth climb the trail with time and grow towards the tip.
+    private static void DrawFlame(Graphics graphics, float centreX, float head, float length, float half, float seed, float time, Color color, int alpha, float wobble = 1, float jagged = 0)
     {
-        const int steps = 16;
-        var left = new PointF[steps + 1];
-        var right = new PointF[steps + 1];
-        for (var step = 0; step <= steps; step++)
+        PointF Edge(float t, float side, float scale)
         {
-            var t = step / (float)steps;
-            var ripple = 1 + 0.2f * MathF.Sqrt(t) * MathF.Sin(t * 10 - time * 11 + seed);
-            var width = half * MathF.Pow(1 - t, 0.8f) * ripple;
-            var sway = MathF.Sin(t * 5 - time * 7 + seed) * half * 0.3f * t;
-            var y = head - t * length;
-            left[step] = new PointF(centreX + sway - width, y);
-            right[step] = new PointF(centreX + sway + width, y);
+            var ripple = 1 + 0.2f * wobble * MathF.Sqrt(t) * MathF.Sin(t * 10 - time * 11 + seed);
+            var width = half * MathF.Pow(1 - t, 0.8f) * ripple * scale;
+            var sway = MathF.Sin(t * 5 - time * 7 + seed) * half * 0.3f * wobble * t;
+            return new PointF(centreX + sway + side * width, head - t * length);
+        }
+
+        PointF[] Side(float side)
+        {
+            if (jagged <= 0)
+            {
+                return Enumerable.Range(0, 17).Select(step => Edge(step / 16f, side, 1)).ToArray();
+            }
+
+            // Inner base, then the barb's tip further out and further up, then straight
+            // back in at the tip's height for the next tooth to start from.
+            const int teeth = 11;
+            var phase = (time * 1.3f + (side < 0 ? 0 : 0.5f)) % 1f;
+            var points = new List<PointF> { Edge(0, side, 1) };
+            for (var tooth = -1; tooth < teeth; tooth++)
+            {
+                var start = (tooth + phase) / teeth;
+                var end = (tooth + 1 + phase) / teeth;
+                if (end <= 0)
+                {
+                    continue;
+                }
+
+                var depth = jagged * MathF.Pow(Math.Clamp(end, 0, 1), 0.5f) * (0.7f + 0.3f * MathF.Abs(MathF.Sin(tooth * 2.3f + seed)));
+                points.Add(Edge(Math.Clamp(start, 0, 1), side, 1 - depth));
+                points.Add(Edge(Math.Min(end, 1), side, 1 + depth * 0.35f));
+                if (end >= 1)
+                {
+                    break;
+                }
+
+                points.Add(Edge(end, side, 1 - depth));
+            }
+
+            return points.ToArray();
         }
 
         using var flame = new GraphicsPath();
-        flame.AddCurve(left);
-        flame.AddCurve(right.Reverse().ToArray());
+        var left = Side(-1);
+        var right = Side(1);
+        if (jagged > 0)
+        {
+            flame.AddLines(left);
+            flame.AddLines(right.Reverse().ToArray());
+        }
+        else
+        {
+            flame.AddCurve(left);
+            flame.AddCurve(right.Reverse().ToArray());
+        }
+
         flame.AddArc(centreX - half, head - half, half * 2, half * 2, 0, 180);
         flame.CloseFigure();
 
