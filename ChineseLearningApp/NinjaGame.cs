@@ -45,6 +45,7 @@ internal sealed class NinjaGame : Panel
     private static readonly Font FloatFont = new("Segoe UI Semibold", 13F);
 
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 15 };
+    private readonly System.Windows.Forms.Timer _autoHit = new() { Interval = 350 };
     private readonly Stopwatch _clock = new();
     private readonly Random _random = new();
     private readonly List<FallingWord> _words = [];
@@ -115,7 +116,18 @@ internal sealed class NinjaGame : Panel
         _input.ImeMode = ImeMode.On;
         _input.Location = new Point(24, 12);
         _input.Width = _inputFrame.Width - 48;
-        _input.TextChanged += (_, _) => TryHit(fromEnter: false);
+        // Typing is checked a moment after it stops, so a word the input method sends
+        // in pieces (你 then 好) arrives whole before it can hit anything.
+        _autoHit.Tick += (_, _) =>
+        {
+            _autoHit.Stop();
+            TryHit(fromEnter: false);
+        };
+        _input.TextChanged += (_, _) =>
+        {
+            _autoHit.Stop();
+            _autoHit.Start();
+        };
         _input.KeyDown += (_, e) =>
         {
             if (e.KeyCode == Keys.Enter)
@@ -187,6 +199,7 @@ internal sealed class NinjaGame : Panel
         if (disposing)
         {
             _timer.Dispose();
+            _autoHit.Dispose();
         }
 
         base.Dispose(disposing);
@@ -405,8 +418,16 @@ internal sealed class NinjaGame : Panel
             return;
         }
 
-        // Characters hit as soon as they match; pinyin waits for Enter, because a
-        // short syllable can be the start of a longer word.
+        // Without Enter, characters only hit when no longer falling word starts with
+        // them (typing 你 must not cut down 你 while the learner is typing 你好).
+        // Pinyin always waits for Enter, since a syllable can start a longer word.
+        if (!fromEnter && _words.Any(falling => !falling.Targeted &&
+                falling.Word.Chinese.Length > typed.Length &&
+                falling.Word.Chinese.StartsWith(typed, StringComparison.Ordinal)))
+        {
+            return;
+        }
+
         var target = _words
             .Where(falling => !falling.Targeted &&
                 (string.Equals(falling.Word.Chinese, typed, StringComparison.Ordinal) || (fromEnter && IsAnswer(falling, typed))))
