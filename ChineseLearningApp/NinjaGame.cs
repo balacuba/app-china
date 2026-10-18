@@ -39,9 +39,6 @@ internal sealed class NinjaGame : Panel
     ];
 
     private static readonly Color TypedColor = Color.FromArgb(248, 56, 56);
-    private static readonly Font HanziFont = new("Microsoft YaHei UI", 22F, FontStyle.Bold);
-    private static readonly Font PinyinUnderFont = new("Segoe UI", 11F);
-    private static readonly Font PinyinOnlyFont = new("Segoe UI Semibold", 17F);
     private static readonly Font HudFont = new("Segoe UI Semibold", 12F);
     private static readonly Font HudEmojiFont = new("Segoe UI Emoji", 13F);
     private static readonly Font BigFont = new("Segoe UI Semibold", 24F);
@@ -114,8 +111,43 @@ internal sealed class NinjaGame : Panel
     // Settings. New words also come more or less often to match.
     public float FallSeconds { get; set; } = DefaultFallSeconds;
 
+    public const int MinTextScale = 50;
+    public const int MaxTextScale = 200;
+
+    // Size of the falling words in percent, set in Settings. The meteors are built
+    // round the words, so their fire, trail, small meteors and blasts scale too.
+    // Words already falling keep their size; the next ones use the new one.
+    public int TextScale
+    {
+        get => _textScale;
+        set
+        {
+            _textScale = Math.Clamp(value, MinTextScale, MaxTextScale);
+            _hanziFont.Dispose();
+            _pinyinUnderFont.Dispose();
+            _pinyinOnlyFont.Dispose();
+            (_hanziFont, _pinyinUnderFont, _pinyinOnlyFont) = CreateFonts(_textScale);
+            Invalidate();
+        }
+    }
+
+    private int _textScale = 100;
+    private Font _hanziFont;
+    private Font _pinyinUnderFont;
+    private Font _pinyinOnlyFont;
+
+    private float Scale => _textScale / 100f;
+
+    private static (Font Hanzi, Font PinyinUnder, Font PinyinOnly) CreateFonts(int scale) =>
+    (
+        new Font("Microsoft YaHei UI", 22F * scale / 100, FontStyle.Bold),
+        new Font("Segoe UI", 11F * scale / 100),
+        new Font("Segoe UI Semibold", 17F * scale / 100)
+    );
+
     public NinjaGame()
     {
+        (_hanziFont, _pinyinUnderFont, _pinyinOnlyFont) = CreateFonts(_textScale);
         SetStyle(
             ControlStyles.AllPaintingInWmPaint |
             ControlStyles.OptimizedDoubleBuffer |
@@ -516,9 +548,9 @@ internal sealed class NinjaGame : Panel
     // Size of a falling word for the current mode (characters, pinyin, or both).
     private SizeF MeasureWord(GameWord word)
     {
-        var hanzi = TextRenderer.MeasureText(word.Chinese, HanziFont);
-        var under = TextRenderer.MeasureText(word.Pinyin, PinyinUnderFont);
-        var only = TextRenderer.MeasureText(word.Pinyin, PinyinOnlyFont);
+        var hanzi = TextRenderer.MeasureText(word.Chinese, _hanziFont);
+        var under = TextRenderer.MeasureText(word.Pinyin, _pinyinUnderFont);
+        var only = TextRenderer.MeasureText(word.Pinyin, _pinyinOnlyFont);
         return Mode switch
         {
             NinjaGameMode.Hanzi => new SizeF(hanzi.Width, hanzi.Height),
@@ -931,15 +963,15 @@ internal sealed class NinjaGame : Panel
         switch (Mode)
         {
             case NinjaGameMode.Hanzi:
-                Glow(falling.Word.Chinese, HanziFont, new Rectangle(x, y, width, (int)falling.Size.Height), hanziTyped);
+                Glow(falling.Word.Chinese, _hanziFont, new Rectangle(x, y, width, (int)falling.Size.Height), hanziTyped);
                 break;
             case NinjaGameMode.HanziPinyin:
-                var hanziHeight = TextRenderer.MeasureText(falling.Word.Chinese, HanziFont).Height;
-                Glow(falling.Word.Chinese, HanziFont, new Rectangle(x, y, width, hanziHeight), hanziTyped);
-                Glow(falling.Word.Pinyin, PinyinUnderFont, new Rectangle(x, y + hanziHeight, width, (int)falling.Size.Height - hanziHeight), pinyinTyped);
+                var hanziHeight = TextRenderer.MeasureText(falling.Word.Chinese, _hanziFont).Height;
+                Glow(falling.Word.Chinese, _hanziFont, new Rectangle(x, y, width, hanziHeight), hanziTyped);
+                Glow(falling.Word.Pinyin, _pinyinUnderFont, new Rectangle(x, y + hanziHeight, width, (int)falling.Size.Height - hanziHeight), pinyinTyped);
                 break;
             default:
-                Glow(falling.Word.Pinyin, PinyinOnlyFont, new Rectangle(x, y, width, (int)falling.Size.Height), pinyinTyped);
+                Glow(falling.Word.Pinyin, _pinyinOnlyFont, new Rectangle(x, y, width, (int)falling.Size.Height), pinyinTyped);
                 break;
         }
     }
@@ -955,7 +987,7 @@ internal sealed class NinjaGame : Panel
         var radius = MeteorRadius(falling);
         var seed = falling.X * 0.37f;
         var time = (float)_twinkle;
-        var length = 120 + radius * 2.7f;
+        var length = 120 * Scale + radius * 2.7f;
 
         // Warm haze around the head.
         FireDisc(graphics, centreX, centreY, radius * 2.5f, Color.FromArgb(85, 249, 115, 22));
@@ -1124,7 +1156,7 @@ internal sealed class NinjaGame : Panel
             var dx = sin * across;
             var dy = -cos * depth + sin * across * tilt;
             var speed = MathF.Max(0.001f, MathF.Sqrt(dx * dx + dy * dy));
-            var size = (2f + 2.6f * hash) * (sin > 0 ? 1 : 0.75f);
+            var size = (2f + 2.6f * hash) * Scale * (sin > 0 ? 1 : 0.75f);
             yield return new Fragment(x, y, size, dx / speed, dy / speed, sin > 0);
         }
     }
