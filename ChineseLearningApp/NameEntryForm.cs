@@ -52,7 +52,13 @@ internal sealed class NameEntryForm : Form
         Controls.AddRange([prompt, _nameTextBox, _validationLabel, continueButton, cancelButton]);
         AcceptButton = continueButton;
         CancelButton = cancelButton;
-        Shown += (_, _) => _nameTextBox.Focus();
+        // Start with the name from last time, selected so it can be retyped.
+        _nameTextBox.Text = AppState.Load().UserName;
+        Shown += (_, _) =>
+        {
+            _nameTextBox.Focus();
+            _nameTextBox.SelectAll();
+        };
     }
 
     private void ContinueButton_Click(object? sender, EventArgs e)

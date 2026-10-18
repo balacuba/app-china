@@ -137,6 +137,8 @@ public sealed partial class Form1 : Form
     private int _practiceDurationSeconds = 10;
     private int _correctAnswerCount;
     private int _wrongAnswerCount;
+    // Switches typing practice between words (0) and example sentences (1).
+    private Action<int>? _selectPracticeMode;
     private long _advanceAt;
     private long _pausedAdvanceRemaining;
     private bool _showingMeaning;
@@ -298,10 +300,82 @@ public sealed partial class Form1 : Form
             _flashcardFlipTimer.Dispose();
             ReleaseSpeechVoice();
         };
+        var appState = AppState.Load();
+        RestoreSessionFilters(appState);
         UpdatePracticeScore();
         RefreshVocabulary();
         RefreshStudyWords();
         AdjustColumnWidths();
+        RestoreSessionView(appState);
+        FormClosing += (_, _) => SaveAppState();
+    }
+
+    // Last session's word list filters and typing score (before the lists fill).
+    private void RestoreSessionFilters(AppState state)
+    {
+        _correctAnswerCount = Math.Max(0, state.CorrectAnswers);
+        _wrongAnswerCount = Math.Max(0, state.WrongAnswers);
+        if (state.HskFilter is { Count: > 0 } hskFilter)
+        {
+            _columnFilters[nameof(VocabularyWord.HskLevel)] = hskFilter.ToHashSet(StringComparer.Ordinal);
+            if (_grid.Columns[nameof(VocabularyWord.HskLevel)] is { } column)
+            {
+                UpdateColumnFilterHeader(column);
+            }
+        }
+
+        _searchBox.Text = state.SearchText ?? string.Empty;
+    }
+
+    // Last session's window, practice mode and open page.
+    private void RestoreSessionView(AppState state)
+    {
+        var bounds = new Rectangle(state.WindowX, state.WindowY, state.WindowWidth, state.WindowHeight);
+        // Only reuse the old window if it still fits on a connected screen.
+        if (bounds.Width >= MinimumSize.Width && bounds.Height >= MinimumSize.Height &&
+            Screen.AllScreens.Any(screen => screen.WorkingArea.IntersectsWith(bounds)))
+        {
+            StartPosition = FormStartPosition.Manual;
+            Bounds = bounds;
+        }
+
+        if (state.WindowMaximized)
+        {
+            WindowState = FormWindowState.Maximized;
+        }
+
+        if (state.PracticeExampleMode)
+        {
+            _selectPracticeMode?.Invoke(1);
+        }
+
+        if (_tabs is not null && state.PageIndex > 0 && state.PageIndex < _tabs.TabCount)
+        {
+            _tabs.SelectedIndex = state.PageIndex;
+        }
+    }
+
+    private void SaveAppState()
+    {
+        // The normal (not maximized) size is kept, so un-maximizing later still fits.
+        var bounds = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+        new AppState
+        {
+            UserName = _userName,
+            WindowX = bounds.X,
+            WindowY = bounds.Y,
+            WindowWidth = bounds.Width,
+            WindowHeight = bounds.Height,
+            WindowMaximized = WindowState == FormWindowState.Maximized,
+            PageIndex = _tabs?.SelectedIndex ?? 0,
+            HskFilter = _columnFilters.TryGetValue(nameof(VocabularyWord.HskLevel), out var hskFilter)
+                ? hskFilter.ToList()
+                : null,
+            SearchText = _searchBox.Text,
+            PracticeExampleMode = _practiceExampleMode,
+            CorrectAnswers = _correctAnswerCount,
+            WrongAnswers = _wrongAnswerCount
+        }.Save();
     }
 
     // Sizes each text column to fit ~95% of its values (and its header), capped so
@@ -557,7 +631,7 @@ public sealed partial class Form1 : Form
         var totalCard = new StatCard { Icon = "📖", BadgeColor = Color.FromArgb(219, 234, 254), Caption = "Tổng từ vựng" };
         var studyingCard = new StatCard { Icon = "✅", BadgeColor = Color.FromArgb(220, 252, 231), Caption = "Đang học" };
         var missedCard = new StatCard { Icon = "❌", BadgeColor = Color.FromArgb(254, 226, 226), Caption = "Từ gõ sai" };
-        var practiceCard = new StatCard { Icon = "🎯", BadgeColor = Color.FromArgb(254, 243, 199), Caption = "Luyện gõ phiên này" };
+        var practiceCard = new StatCard { Icon = "🎯", BadgeColor = Color.FromArgb(254, 243, 199), Caption = "Kết quả luyện gõ" };
         var statCards = new List<StatCard> { totalCard, studyingCard, missedCard, practiceCard };
         var hskProgress = new HskProgressView();
 
@@ -572,7 +646,7 @@ public sealed partial class Form1 : Form
             missedCard.Note = _incorrectWordCounts.Count == 0 ? "Không có từ nào sai 🎉" : "Gõ đúng để xóa khỏi danh sách";
             var answered = _correctAnswerCount + _wrongAnswerCount;
             practiceCard.Value = answered == 0 ? "—" : $"{_correctAnswerCount}/{answered}";
-            practiceCard.Note = answered == 0 ? "Chưa luyện trong phiên này" : $"Chính xác {_correctAnswerCount * 100.0 / answered:0}%";
+            practiceCard.Note = answered == 0 ? "Chưa luyện gõ lần nào" : $"Chính xác {_correctAnswerCount * 100.0 / answered:0}%";
             statCards.ForEach(card => card.Invalidate());
 
             var levels = HskFilterLevels.Select(level => (Name: level, Words: _words.Where(word => word.HskLevel == level).ToList()))
@@ -730,7 +804,7 @@ public sealed partial class Form1 : Form
     {
         private const int HeaderHeight = 58;
         private const int RowHeight = 40;
-        private const int Padding = 22;
+        private const int CardPadding = 22;
         private static readonly Font TitleFont = new("Segoe UI Semibold", 13F);
         private static readonly Font LevelFont = new("Segoe UI Semibold", 10.5F);
         private static readonly Font CountFont = new(UiFontName, 9.5F);
@@ -760,7 +834,7 @@ public sealed partial class Form1 : Form
         }
 
         public int GetPreferredHeight(int width) =>
-            HeaderHeight + (_rows.Count + 1) / 2 * RowHeight + Padding;
+            HeaderHeight + (_rows.Count + 1) / 2 * RowHeight + CardPadding;
 
         protected override void OnPaint(PaintEventArgs e)
         {
@@ -775,14 +849,14 @@ public sealed partial class Form1 : Form
                 graphics.DrawPath(outline, path);
             }
 
-            TextRenderer.DrawText(graphics, "📊  Tiến độ luyện gõ theo cấp HSK  ·  số từ đã gõ đúng", TitleFont, new Rectangle(Padding, 16, Width - 2 * Padding, 28),
+            TextRenderer.DrawText(graphics, "📊  Tiến độ luyện gõ theo cấp HSK  ·  số từ đã gõ đúng", TitleFont, new Rectangle(CardPadding, 16, Width - 2 * CardPadding, 28),
                 TextColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
             const int columnGap = 36;
-            var columnWidth = (Width - 2 * Padding - columnGap) / 2;
+            var columnWidth = (Width - 2 * CardPadding - columnGap) / 2;
             for (var index = 0; index < _rows.Count; index++)
             {
                 var row = _rows[index];
-                var left = Padding + index % 2 * (columnWidth + columnGap);
+                var left = CardPadding + index % 2 * (columnWidth + columnGap);
                 var top = HeaderHeight + index / 2 * RowHeight;
                 const int levelWidth = 78;
                 const int countWidth = 150;
@@ -2007,6 +2081,7 @@ public sealed partial class Form1 : Form
 
         checkPracticeMode = AttachRoundedMenu(practiceModeBox, practiceModes, SelectPracticeMode);
         SelectPracticeMode(0);
+        _selectPracticeMode = SelectPracticeMode;
         practiceActions.Controls.AddRange([continueStudyButton, _pausePracticeButton, _skipPracticeButton]);
         _practiceTimerLabel.Dock = DockStyle.Fill;
         _practiceTimerLabel.Font = new Font("Segoe UI", 12F, FontStyle.Bold);
