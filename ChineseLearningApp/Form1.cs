@@ -1007,8 +1007,9 @@ public sealed partial class Form1 : Form
         _grid.ShowCellToolTips = true;
         _grid.BackgroundColor = SurfaceColor;
         _grid.BorderStyle = BorderStyle.None;
-        _grid.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
-        _grid.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None;
+        // Every cell is boxed (lines between rows and columns) so values are easy to follow.
+        _grid.CellBorderStyle = DataGridViewCellBorderStyle.Single;
+        _grid.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
         _grid.GridColor = BorderColor;
         _grid.ColumnHeadersHeight = 42;
         _grid.EnableHeadersVisualStyles = false;
@@ -1073,23 +1074,43 @@ public sealed partial class Form1 : Form
                 column.HeaderText = $"{column.HeaderText}  ▼";
             }
         }
-        _grid.ColumnHeadersDefaultCellStyle.BackColor = HeaderRowColor;
-        _grid.ColumnHeadersDefaultCellStyle.ForeColor = BodyTextColor;
-        _grid.ColumnHeadersDefaultCellStyle.SelectionBackColor = HeaderRowColor;
-        _grid.ColumnHeadersDefaultCellStyle.SelectionForeColor = BodyTextColor;
-        _grid.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI Semibold", 10F);
-        _grid.ColumnHeadersDefaultCellStyle.Padding = new Padding(4, 6, 4, 6);
+        // Soft blue header row with blue headings.
+        _grid.ColumnHeadersDefaultCellStyle.BackColor = AccentSoft;
+        _grid.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(30, 64, 175);
+        _grid.ColumnHeadersDefaultCellStyle.SelectionBackColor = AccentSoft;
+        _grid.ColumnHeadersDefaultCellStyle.SelectionForeColor = Color.FromArgb(30, 64, 175);
+        _grid.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI Semibold", 10.5F);
+        _grid.ColumnHeadersDefaultCellStyle.Padding = new Padding(4, 10, 4, 10);
         _grid.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
         _grid.DefaultCellStyle.Font = new Font(UiFontName, 11F);
         _grid.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
         _grid.DefaultCellStyle.BackColor = SurfaceColor;
         _grid.DefaultCellStyle.ForeColor = TextColor;
-        _grid.DefaultCellStyle.Padding = new Padding(8, 4, 8, 4);
-        _grid.DefaultCellStyle.SelectionBackColor = AccentSoft;
+        _grid.DefaultCellStyle.Padding = new Padding(8, 5, 8, 5);
+        _grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(219, 234, 254);
         _grid.DefaultCellStyle.SelectionForeColor = TextColor;
         _grid.AlternatingRowsDefaultCellStyle.BackColor = StripeRowColor;
-        _grid.RowTemplate.Height = 38;
-        _grid.RowTemplate.MinimumHeight = 38;
+        _grid.GridColor = Color.FromArgb(214, 222, 233);
+        _grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+        _grid.RowTemplate.Height = 42;
+        _grid.RowTemplate.MinimumHeight = 42;
+        // Hán characters in dark blue, pinyin in teal.
+        foreach (var (property, color) in new[]
+                 {
+                     (nameof(VocabularyWord.Chinese), Color.FromArgb(30, 64, 175)),
+                     (nameof(VocabularyWord.Pinyin), Color.FromArgb(13, 148, 136))
+                 })
+        {
+            if (_grid.Columns[property] is { } column)
+            {
+                column.DefaultCellStyle.ForeColor = color;
+                column.DefaultCellStyle.SelectionForeColor = color;
+            }
+        }
+
+        // Light blue under the row the mouse is over.
+        _grid.CellMouseEnter += (_, e) => SetHoverRow(e.RowIndex);
+        _grid.MouseLeave += (_, _) => SetHoverRow(-1);
         // Columns are squeezed to fit the view, so long text wraps and rows grow.
         _grid.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
         _grid.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.DisplayedCells;
@@ -1108,7 +1129,18 @@ public sealed partial class Form1 : Form
         };
 
         layout.Controls.Add(searchRow, 0, 0);
-        layout.Controls.Add(CreateCard(_grid, Padding.Empty), 0, 1);
+        // The list sits in a rounded white card.
+        var gridCard = new RoundedPanel
+        {
+            Dock = DockStyle.Fill,
+            Radius = 16,
+            FillColor = SurfaceColor,
+            OutlineColor = BorderColor,
+            BackColor = PageColor,
+            Padding = new Padding(8)
+        };
+        gridCard.Controls.Add(_grid);
+        layout.Controls.Add(gridCard, 0, 1);
         layout.Controls.Add(hint, 0, 2);
         page.Controls.Add(layout);
         return page;
@@ -1765,7 +1797,10 @@ public sealed partial class Form1 : Form
     {
         var size = GetColumnFontSize(column);
         var old = column.DefaultCellStyle.Font;
-        column.DefaultCellStyle.Font = Math.Abs(size - DefaultCellFontSize) < 0.01F ? null : new Font(UiFontName, size);
+        // Hán characters use a CJK font, one point larger so they stand out.
+        column.DefaultCellStyle.Font = column.DataPropertyName == nameof(VocabularyWord.Chinese)
+            ? new Font("Microsoft YaHei UI", size + 1)
+            : Math.Abs(size - DefaultCellFontSize) < 0.01F ? null : new Font(UiFontName, size);
         old?.Dispose();
     }
 
@@ -3125,6 +3160,7 @@ public sealed partial class Form1 : Form
     private void RefreshVocabulary()
     {
         _refreshingVocabulary = true;
+        _hoverRow = -1; // rows are rebuilt, so any hover colour goes with them
         try
         {
             _visibleWords.RaiseListChangedEvents = false;
@@ -3773,6 +3809,14 @@ public sealed partial class Form1 : Form
             return;
         }
 
+        if (e.RowIndex >= 0 &&
+            e.ColumnIndex >= 0 &&
+            _grid.Columns[e.ColumnIndex].DataPropertyName == nameof(VocabularyWord.HskLevel))
+        {
+            PaintHskBadge(e);
+            return;
+        }
+
         if (e.RowIndex < 0 ||
             e.ColumnIndex < 0 ||
             e.CellStyle is null ||
@@ -3802,6 +3846,76 @@ public sealed partial class Form1 : Form
             Math.Max(1, e.CellBounds.Height - e.CellStyle.Padding.Vertical - 1));
         DrawHighlightedSegments(e.Graphics!, segments, e.CellStyle.Font ?? _grid.Font, bounds, normalColor, centerVertically: true);
         e.Handled = true;
+    }
+
+    // Pastel badge colours (fill, text) for each HSK level.
+    private static readonly Dictionary<string, (Color Fill, Color Text)> HskBadgeColors = new(StringComparer.Ordinal)
+    {
+        ["HSK 1"] = (Color.FromArgb(220, 252, 231), Color.FromArgb(21, 128, 61)),
+        ["HSK 2"] = (Color.FromArgb(204, 251, 241), Color.FromArgb(15, 118, 110)),
+        ["HSK 3"] = (Color.FromArgb(219, 234, 254), Color.FromArgb(29, 78, 216)),
+        ["HSK 4"] = (Color.FromArgb(224, 231, 255), Color.FromArgb(67, 56, 202)),
+        ["HSK 5"] = (Color.FromArgb(243, 232, 255), Color.FromArgb(126, 34, 206)),
+        ["HSK 6"] = (Color.FromArgb(252, 231, 243), Color.FromArgb(190, 24, 93)),
+        ["HSK 7-9"] = (Color.FromArgb(255, 237, 213), Color.FromArgb(194, 65, 12))
+    };
+
+    // "Cấp HSK" cells show the level as a rounded coloured badge.
+    private static void PaintHskBadge(DataGridViewCellPaintingEventArgs e)
+    {
+        e.Paint(e.CellBounds, DataGridViewPaintParts.All & ~DataGridViewPaintParts.ContentForeground);
+        var text = Convert.ToString(e.FormattedValue, CultureInfo.CurrentCulture);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            e.Handled = true;
+            return;
+        }
+
+        var (fill, color) = HskBadgeColors.TryGetValue(text, out var colors)
+            ? colors
+            : (Color.FromArgb(241, 245, 249), Color.FromArgb(71, 85, 105));
+        var graphics = e.Graphics!;
+        using var font = new Font("Segoe UI Semibold", 9.5F);
+        var textSize = TextRenderer.MeasureText(graphics, text, font, Size.Empty, TextFormatFlags.NoPadding);
+        var badge = new RectangleF(
+            e.CellBounds.Left + (e.CellBounds.Width - (textSize.Width + 22)) / 2F,
+            e.CellBounds.Top + (e.CellBounds.Height - 26) / 2F,
+            textSize.Width + 22,
+            26);
+        var smoothing = graphics.SmoothingMode;
+        graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        using (var path = RoundedMenuRenderer.CreateRoundedPath(badge, 13))
+        using (var brush = new SolidBrush(fill))
+        {
+            graphics.FillPath(brush, path);
+        }
+
+        graphics.SmoothingMode = smoothing;
+        TextRenderer.DrawText(graphics, text, font, Rectangle.Round(badge), color,
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        e.Handled = true;
+    }
+
+    private int _hoverRow = -1;
+
+    private void SetHoverRow(int rowIndex)
+    {
+        if (rowIndex == _hoverRow)
+        {
+            return;
+        }
+
+        var hover = Color.FromArgb(239, 246, 255);
+        if (_hoverRow >= 0 && _hoverRow < _grid.RowCount)
+        {
+            _grid.Rows[_hoverRow].DefaultCellStyle.BackColor = Color.Empty;
+        }
+
+        _hoverRow = rowIndex;
+        if (_hoverRow >= 0 && _hoverRow < _grid.RowCount)
+        {
+            _grid.Rows[_hoverRow].DefaultCellStyle.BackColor = hover;
+        }
     }
 
     // Without scrollbars the grid ignores the wheel, so scroll rows by hand
