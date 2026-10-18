@@ -72,12 +72,13 @@ internal sealed class NameEntryForm : Form
             };
         }
 
-        // The name section fills the white area between header and footer.
-        var body = new Panel
+        // The name section fills the white area between header and footer; its
+        // four corners are rounded inward, showing the header blue at the top and
+        // the footer tint at the bottom.
+        var body = new RoundedBody
         {
             Location = new Point(0, 120),
-            Size = new Size(ClientSize.Width, ClientSize.Height - 120 - 96),
-            BackColor = Form1.SurfaceColor
+            Size = new Size(ClientSize.Width, ClientSize.Height - 120 - 96)
         };
 
         var prompt = new Label
@@ -146,6 +147,43 @@ internal sealed class NameEntryForm : Form
         };
     }
 
+    private static readonly Color FooterTint = Color.FromArgb(232, 238, 247);
+
+    // White middle area with all four corners rounded: the top corners sit on
+    // the header blue and the bottom ones on the footer tint.
+    private sealed class RoundedBody : Panel
+    {
+        public RoundedBody()
+        {
+            SetStyle(
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw |
+                ControlStyles.UserPaint,
+                true);
+            BackColor = Form1.SurfaceColor;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var graphics = e.Graphics;
+            using (var top = new SolidBrush(Form1.Accent))
+            {
+                graphics.FillRectangle(top, 0, 0, Width, Height / 2);
+            }
+
+            using (var bottom = new SolidBrush(FooterTint))
+            {
+                graphics.FillRectangle(bottom, 0, Height / 2, Width, Height - Height / 2);
+            }
+
+            graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using var path = Form1.RoundedMenuRenderer.CreateRoundedPath(new RectangleF(0, 0, Width, Height), CornerRadius);
+            using var white = new SolidBrush(Form1.SurfaceColor);
+            graphics.FillPath(white, path);
+        }
+    }
+
     // "Made with ♥ by Tuấn Anh" over a rounded mail chip,
     // on a soft tinted band.
     private sealed class AuthorFooter : Control
@@ -176,7 +214,7 @@ internal sealed class NameEntryForm : Form
         {
             // A softly tinted band with straight edges.
             var graphics = e.Graphics;
-            graphics.Clear(Color.FromArgb(232, 238, 247));
+            graphics.Clear(FooterTint);
             graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
 
             // Line 1: "Made with ♥ by Tuấn Anh", centred, name in accent.
