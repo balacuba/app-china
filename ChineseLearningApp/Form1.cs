@@ -894,8 +894,15 @@ public sealed partial class Form1 : Form
             Visible = false
         };
         searchFrame.Controls.AddRange([searchIcon, _searchBox, clearSearch]);
-        // The HSK filter pill sits first, so the search box can open to its right.
+        // Filter first, then pick: the HSK filter pill, then "Chọn từ để học"
+        // (the study word picker), then search last so its box can open to the right.
+        var studyWordsButton = CreateButton("📝  Chọn từ để học  ▾", (_, _) => { }, secondary: true);
+        studyWordsButton.AutoSize = false;
+        studyWordsButton.Size = new Size(210, 40);
+        studyWordsButton.Margin = new Padding(0, 4, 12, 0);
+        studyWordsButton.Click += (_, _) => ShowStudyWordMenu(studyWordsButton);
         searchRow.Controls.Add(BuildHskFilterButton());
+        searchRow.Controls.Add(studyWordsButton);
         searchRow.Controls.Add(searchButton);
         searchRow.Controls.Add(searchFrame);
 
@@ -1029,7 +1036,6 @@ public sealed partial class Form1 : Form
                 FitColumnsToGrid();
             }
         };
-        _grid.ColumnHeaderMouseClick += VocabularyGrid_ColumnHeaderMouseClick;
         _grid.CellBeginEdit += VocabularyGrid_CellBeginEdit;
         _grid.CellEndEdit += VocabularyGrid_CellEndEdit;
         _grid.EditingControlShowing += VocabularyGrid_EditingControlShowing;
@@ -1059,7 +1065,7 @@ public sealed partial class Form1 : Form
         ApplyColumnOrder();
         foreach (DataGridViewColumn column in _grid.Columns)
         {
-            // The study tick column is hidden: words are picked from the Tiếng Trung header menu.
+            // The study tick column is hidden: words are picked from the “Chọn từ để học” pill.
             column.Visible = column.Name != nameof(VocabularyWord.IsSelected) &&
                 (!_columnVisibility.TryGetValue(column.Name, out var visible) || visible);
             _columnVisibility[column.Name] = column.Visible;
@@ -1069,10 +1075,6 @@ public sealed partial class Form1 : Form
             column.ReadOnly = column.DataPropertyName != nameof(VocabularyWord.IsSelected) &&
                 !IsEditableTextColumn(column.DataPropertyName);
             ApplyColumnFont(column);
-            if (HasHeaderMenu(column.DataPropertyName))
-            {
-                column.HeaderText = $"{column.HeaderText}  ▼";
-            }
         }
         // Soft blue header row with blue headings.
         _grid.ColumnHeadersDefaultCellStyle.BackColor = AccentSoft;
@@ -1123,7 +1125,7 @@ public sealed partial class Form1 : Form
         var hint = new Label
         {
             Dock = DockStyle.Fill,
-            Text = "Bấm tiêu đề “Tiếng Trung” để chọn từ muốn học (theo tìm kiếm và lọc HSK). Flashcard và luyện gõ chỉ dùng các từ đã chọn.",
+            Text = "Bấm “Chọn từ để học” để chọn từ (theo tìm kiếm và lọc HSK). Flashcard và luyện gõ chỉ dùng các từ đã chọn.",
             ForeColor = MutedTextColor,
             TextAlign = ContentAlignment.MiddleLeft
         };
@@ -3193,7 +3195,7 @@ public sealed partial class Form1 : Form
     }
 
     // HSK quick filter: one tick box per level plus "Khác" for words with any
-    // other (or no) level. It edits the same filter as the "Cấp HSK" header menu.
+    // other (or no) level. It is the only HSK filter.
     private static readonly string[] HskFilterLevels = ["HSK 1", "HSK 2", "HSK 3", "HSK 4", "HSK 5", "HSK 6", "HSK 7-9"];
     private readonly List<(RoundedCheckBox Box, string? Level, string Caption)> _hskFilterChecks = [];
     private bool _syncingHskFilterChecks;
@@ -3420,42 +3422,23 @@ public sealed partial class Form1 : Form
         return _columnFilters.All(filter => filter.Value.Contains(GetFilterValue(word, filter.Key)));
     }
 
-    // Only the "Tiếng Trung" header opens a menu (the study word picker); the
-    // HSK level is filtered from the "Lọc HSK" pill instead.
-    private static bool HasHeaderMenu(string propertyName) =>
-        propertyName is nameof(VocabularyWord.Chinese);
-
     private static string GetFilterValue(VocabularyWord word, string propertyName) => propertyName switch
     {
         nameof(VocabularyWord.HskLevel) => word.HskLevel,
         _ => word.Chinese
     };
 
-    private void VocabularyGrid_ColumnHeaderMouseClick(
-        object? sender,
-        DataGridViewCellMouseEventArgs e)
+
+    // "Chọn từ để học" lists the words left by the search and the HSK filter,
+    // each with its study tick, plus tick-all / untick-all for those words. It
+    // drops down under its pill as a rounded card: title, rounded search box,
+    // rounded list with rounded tick boxes.
+    private void ShowStudyWordMenu(Control anchor)
     {
-        if (e.ColumnIndex < 0)
-        {
-            return;
-        }
-
-        var column = _grid.Columns[e.ColumnIndex];
-        if (!HasHeaderMenu(column.DataPropertyName))
-        {
-            return;
-        }
-
-        ShowStudyWordMenu(column);
-    }
-
-    // "Tiếng Trung" lists the words left by the search and the HSK ticks, each
-    // with its study tick, plus tick-all / untick-all for those words. It is a
-    // rounded card: rounded search box, rounded list with rounded tick boxes.
-    private void ShowStudyWordMenu(DataGridViewColumn column)
-    {
-        const int menuWidth = 340;
-        const int menuHeight = 480;
+        // As wide as its pill; the two buttons stack under the list.
+        var menuWidth = anchor.Width;
+        const int menuHeight = 492;
+        const int side = 10;
         var dropDown = new ToolStripDropDown { AutoClose = true, Padding = Padding.Empty, DropShadowEnabled = true };
         var card = new RoundedPanel
         {
@@ -3465,13 +3448,23 @@ public sealed partial class Form1 : Form
             OutlineColor = Color.FromArgb(203, 213, 225),
             BackColor = SurfaceColor
         };
+        card.Controls.Add(new Label
+        {
+            AutoSize = false,
+            Location = new Point(side + 2, 12),
+            Size = new Size(menuWidth - 2 * side - 4, 28),
+            Text = "Chọn từ để học",
+            Font = new Font("Segoe UI Semibold", 12F),
+            ForeColor = TextColor,
+            BackColor = SurfaceColor
+        });
 
         // Rounded search box with a magnifier.
         var searchFrame = new RoundedPanel
         {
-            Location = new Point(14, 14),
-            Size = new Size(menuWidth - 28, 38),
-            Radius = 19,
+            Location = new Point(side, 46),
+            Size = new Size(menuWidth - 2 * side, 38),
+            Radius = 17,
             FillColor = PageColor,
             OutlineColor = BorderColor,
             BackColor = SurfaceColor,
@@ -3494,26 +3487,16 @@ public sealed partial class Form1 : Form
             BorderStyle = BorderStyle.None,
             BackColor = PageColor,
             Font = new Font(UiFontName, 10.5F),
-            PlaceholderText = "Tìm chữ Hán hoặc pinyin..."
+            PlaceholderText = "Tìm từ..."
         };
         searchFrame.Controls.Add(searchIcon);
         searchFrame.Controls.Add(search);
 
-        var summary = new PillLabel
-        {
-            AutoSize = false,
-            Location = new Point(14, 62),
-            Size = new Size(menuWidth - 28, 30),
-            Font = new Font(UiFontName, 9.5F, FontStyle.Bold),
-            ForeColor = Accent,
-            TextAlign = ContentAlignment.MiddleCenter
-        };
-
         // Owner-drawn list in a rounded frame: a click anywhere on a row toggles it.
         var listFrame = new RoundedPanel
         {
-            Location = new Point(14, 102),
-            Size = new Size(menuWidth - 28, 280),
+            Location = new Point(side, 92),
+            Size = new Size(menuWidth - 2 * side, 300),
             Radius = 14,
             FillColor = SurfaceColor,
             OutlineColor = BorderColor,
@@ -3571,14 +3554,6 @@ public sealed partial class Form1 : Form
                 MutedTextColor, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
         };
 
-        void UpdateSummary()
-        {
-            var words = wordList.Items.OfType<StudyWordOption>().Select(option => option.Word).ToList();
-            var hskLevels = _hskFilterChecks.Where(item => item.Box.Checked).Select(item => item.Level ?? "Khác").ToList();
-            var source = hskLevels.Count == 0 ? "Tất cả HSK" : string.Join(", ", hskLevels);
-            summary.Text = $"{source}  •  {words.Count} từ  •  ✅ {words.Count(word => word.IsSelected)} đang học";
-        }
-
         void FillList()
         {
             var query = search.Text.Trim();
@@ -3598,8 +3573,6 @@ public sealed partial class Form1 : Form
             {
                 wordList.EndUpdate();
             }
-
-            UpdateSummary();
         }
 
         // Toggling a row works like ticking "Học" in the grid.
@@ -3614,7 +3587,6 @@ public sealed partial class Form1 : Form
             wordList.Invalidate(wordList.GetItemRectangle(index));
             _grid.InvalidateColumn(_grid.Columns[nameof(VocabularyWord.IsSelected)]!.Index);
             RefreshStudyWords();
-            UpdateSummary();
         }
 
         search.TextChanged += (_, _) => FillList();
@@ -3647,30 +3619,21 @@ public sealed partial class Form1 : Form
             }
         };
 
-        var buttonsTitle = new Label
-        {
-            AutoSize = false,
-            Location = new Point(16, 392),
-            Size = new Size(menuWidth - 32, 20),
-            ForeColor = MutedTextColor,
-            BackColor = SurfaceColor,
-            Text = "Chọn học các từ đang hiển thị:"
-        };
+        // Tick-all / untick-all apply to the words currently shown.
         var studyButtons = new[]
         {
-            CreateButton("✔  Tích chọn tất cả", (s, e) => { SelectAllWords(s, e); wordList.Invalidate(); UpdateSummary(); }),
-            CreateButton("✖  Bỏ tích tất cả", (s, e) => { ClearWordSelection(s, e); wordList.Invalidate(); UpdateSummary(); }, secondary: true)
+            CreateButton("✔  Tích chọn tất cả", (s, e) => { SelectAllWords(s, e); wordList.Invalidate(); }),
+            CreateButton("✖  Bỏ tích tất cả", (s, e) => { ClearWordSelection(s, e); wordList.Invalidate(); }, secondary: true)
         };
-        var buttonWidth = (menuWidth - 28 - 10) / 2;
         for (var index = 0; index < studyButtons.Length; index++)
         {
             studyButtons[index].AutoSize = false;
-            studyButtons[index].Size = new Size(buttonWidth, 40);
+            studyButtons[index].Size = new Size(menuWidth - 2 * side, 36);
             studyButtons[index].Margin = Padding.Empty;
-            studyButtons[index].Location = new Point(14 + index * (buttonWidth + 10), 418);
+            studyButtons[index].Location = new Point(side, 402 + index * 42);
         }
 
-        card.Controls.AddRange([searchFrame, summary, listFrame, buttonsTitle, .. studyButtons]);
+        card.Controls.AddRange([searchFrame, listFrame, .. studyButtons]);
         dropDown.Items.Add(new ToolStripControlHost(card)
         {
             AutoSize = false,
@@ -3693,8 +3656,7 @@ public sealed partial class Form1 : Form
         };
         FillList();
 
-        var headerBounds = _grid.GetCellDisplayRectangle(column.Index, -1, true);
-        dropDown.Show(_grid.PointToScreen(new Point(headerBounds.Left, headerBounds.Bottom + 4)));
+        dropDown.Show(anchor.PointToScreen(new Point(0, anchor.Height + 4)));
     }
 
     private sealed record StudyWordOption(VocabularyWord Word)
