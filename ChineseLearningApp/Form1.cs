@@ -55,6 +55,18 @@ public sealed partial class Form1 : Form
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "ChineseLearningApp",
         "practice-settings.json");
+    // Ninja game fall speed chosen in Settings.
+    private readonly string _ninjaSettingsPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "ChineseLearningApp",
+        "ninja-settings.json");
+    private static readonly (string Text, float Speed)[] NinjaSpeeds =
+    [
+        ("🐢 Chậm", 0.6f),
+        ("Vừa", 1f),
+        ("🐇 Nhanh", 1.4f),
+        ("⚡ Rất nhanh", 1.9f)
+    ];
     // The ticked "Học" words, kept apart from vocabulary.json so ticking a box
     // does not rewrite the whole word list.
     private readonly string _selectedWordsPath = Path.Combine(
@@ -294,6 +306,7 @@ public sealed partial class Form1 : Form
                 MessageBoxIcon.Error);
         }
 
+        LoadNinjaSpeed();
         BuildInterface();
         _practiceTimer.Tick += PracticeTimer_Tick;
         _flashcardFlipTimer.Tick += FlashcardFlipTimer_Tick;
@@ -1256,8 +1269,59 @@ public sealed partial class Form1 : Form
             Text = "Từ 1 đến 300 giây",
             Margin = new Padding(8, 11, 0, 0)
         });
+        // Ninja game: how fast the words fall, as four pills (the chosen one is filled).
+        var speedRow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            WrapContents = false,
+            BackColor = SurfaceColor,
+            Padding = new Padding(0, 4, 0, 0)
+        };
+        var speedButtons = new List<(Button Button, float Speed)>();
+        void ShowSpeed()
+        {
+            foreach (var (button, speed) in speedButtons)
+            {
+                StyleButton(button, Math.Abs(speed - _ninjaGame.SpeedFactor) < 0.01f ? ButtonKind.Primary : ButtonKind.Secondary);
+            }
+        }
+
+        foreach (var (text, speed) in NinjaSpeeds)
+        {
+            var button = CreateButton(text, (_, _) =>
+            {
+                SetNinjaSpeed(speed);
+                ShowSpeed();
+            }, secondary: true);
+            button.AutoSize = false;
+            button.Size = new Size(text.Length > 6 ? 118 : 92, 36);
+            button.Margin = new Padding(0, 0, 8, 0);
+            ((RoundedButton)button).Radius = 18;
+            speedButtons.Add((button, speed));
+            speedRow.Controls.Add(button);
+        }
+
+        ShowSpeed();
+        var practiceBody = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, BackColor = SurfaceColor };
+        practiceBody.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
+        practiceBody.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));
+        practiceBody.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
+        practiceBody.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        Label SubTitle(string text) => new()
+        {
+            AutoSize = true,
+            Text = text,
+            Font = new Font("Segoe UI Semibold", 10F),
+            ForeColor = BodyTextColor,
+            BackColor = SurfaceColor,
+            Margin = new Padding(0, 4, 0, 0)
+        };
+        practiceBody.Controls.Add(SubTitle("Thời gian mỗi câu"), 0, 0);
+        practiceBody.Controls.Add(stepper, 0, 1);
+        practiceBody.Controls.Add(SubTitle("Tốc độ chữ rơi (Ninja phi tiêu)"), 0, 2);
+        practiceBody.Controls.Add(speedRow, 0, 3);
         var practiceCard = CreateSettingsSection("⏱", Color.FromArgb(220, 252, 231), "Luyện gõ",
-            "Thời gian cho mỗi câu khi luyện gõ.", stepper);
+            "Thời gian mỗi câu và tốc độ chữ rơi của Ninja phi tiêu.", practiceBody);
 
         // Visible columns: rounded checkboxes in two columns.
         var columnChecks = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, BackColor = SurfaceColor };
@@ -1468,7 +1532,7 @@ public sealed partial class Form1 : Form
             $"Phóng to hoặc thu nhỏ chữ của mỗi cột trong danh sách từ ({MinimumCellFontSize:0}–{MaximumCellFontSize:0} pt).", fontGrid);
 
         const int headingHeight = 72;
-        const int topRowHeight = 168;
+        const int topRowHeight = 290;
         const int bottomRowHeight = 470;
         var fontsRowHeight = 62 + fontRows * 54 + 52 + 34 + 20;
         var grid = new TableLayoutPanel { ColumnCount = 2, RowCount = 4, BackColor = PageColor };
@@ -1892,6 +1956,39 @@ public sealed partial class Form1 : Form
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             MessageBox.Show(this, $"Không thể lưu cỡ chữ: {ex.Message}", "Lỗi lưu cài đặt",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    // A missing or unreadable file keeps the normal speed.
+    private void LoadNinjaSpeed()
+    {
+        try
+        {
+            if (File.Exists(_ninjaSettingsPath) &&
+                JsonSerializer.Deserialize<float>(File.ReadAllText(_ninjaSettingsPath, Encoding.UTF8)) is var speed &&
+                NinjaSpeeds.Any(option => Math.Abs(option.Speed - speed) < 0.01f))
+            {
+                _ninjaGame.SpeedFactor = speed;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            _ninjaGame.SpeedFactor = 1f;
+        }
+    }
+
+    private void SetNinjaSpeed(float speed)
+    {
+        _ninjaGame.SpeedFactor = speed;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_ninjaSettingsPath)!);
+            File.WriteAllText(_ninjaSettingsPath, JsonSerializer.Serialize(speed), new UTF8Encoding(false));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            MessageBox.Show(this, $"Không thể lưu tốc độ chữ rơi: {ex.Message}", "Lỗi lưu cài đặt",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }

@@ -88,6 +88,9 @@ internal sealed class NinjaGame : Panel
 
     public int BestScore { get; set; }
 
+    // How fast words fall (and how often new ones come), set in Settings; 1 = normal.
+    public float SpeedFactor { get; set; } = 1f;
+
     public NinjaGame()
     {
         SetStyle(
@@ -300,10 +303,10 @@ internal sealed class NinjaGame : Panel
             var size = MeasureWord(word);
             var x = 20 + (float)_random.NextDouble() * Math.Max(1, sky.Width - size.Width - 40);
             _words.Add(new FallingWord(word, x, -size.Height - 4, size, TextColors[_random.Next(TextColors.Length)]));
-            _spawnIn = Math.Max(0.8, 2.4 - Level * 0.22);
+            _spawnIn = Math.Max(0.8, 2.4 - Level * 0.22) / SpeedFactor;
         }
 
-        var speed = 34 + Level * 10;
+        var speed = (34 + Level * 10) * SpeedFactor;
         var roofTop = sky.Bottom - RoofHeight;
         for (var index = _words.Count - 1; index >= 0; index--)
         {
