@@ -69,6 +69,13 @@ public sealed partial class Form1 : Form
         "ChineseLearningApp",
         "missed-words.json");
     private bool _saveMissedWords;
+    // Words whose latest typing-practice answer was right (HSK progress on Home).
+    private readonly HashSet<string> _typedCorrectWords = new(StringComparer.Ordinal);
+    private readonly string _typedCorrectWordsPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "ChineseLearningApp",
+        "typed-correct-words.json");
+    private bool _saveTypedCorrectWords;
     private readonly Dictionary<string, bool> _columnVisibility = new(StringComparer.Ordinal);
     // Per-column text size in points; columns not listed use DefaultCellFontSize.
     private readonly Dictionary<string, float> _columnFontSizes = new(StringComparer.Ordinal);
@@ -232,6 +239,21 @@ public sealed partial class Form1 : Form
             Shown += (_, _) => MessageBox.Show(
                 this,
                 $"Không thể đọc cỡ chữ các cột: {ex.Message}",
+                "Lỗi đọc cài đặt",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+
+        try
+        {
+            LoadTypedCorrectWords();
+            _saveTypedCorrectWords = true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
+        {
+            Shown += (_, _) => MessageBox.Show(
+                this,
+                $"Không thể đọc danh sách từ đã gõ đúng: {ex.Message}",
                 "Lỗi đọc cài đặt",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
@@ -556,7 +578,8 @@ public sealed partial class Form1 : Form
             var levels = HskFilterLevels.Select(level => (Name: level, Words: _words.Where(word => word.HskLevel == level).ToList()))
                 .Append((Name: "Khác", Words: _words.Where(word => !HskFilterLevels.Contains(word.HskLevel)).ToList()))
                 .Where(level => level.Words.Count > 0)
-                .Select(level => new HskProgressRow(level.Name, level.Words.Count, level.Words.Count(word => word.IsSelected)))
+                .Select(level => new HskProgressRow(level.Name, level.Words.Count,
+                    level.Words.Count(word => _typedCorrectWords.Contains(word.Chinese))))
                 .ToList();
             hskProgress.SetRows(levels);
         }
@@ -641,7 +664,7 @@ public sealed partial class Form1 : Form
         return page;
     }
 
-    private sealed record HskProgressRow(string Level, int Total, int Studying);
+    private sealed record HskProgressRow(string Level, int Total, int TypedCorrect);
 
     // A rounded white statistics card: emoji badge, a big value, a caption and
     // a muted note underneath.
@@ -702,7 +725,7 @@ public sealed partial class Form1 : Form
     }
 
     // A rounded card listing each HSK level with a rounded progress bar of how
-    // many of its words are being studied; two levels per row.
+    // many of its words were typed correctly in practice; two per row.
     private sealed class HskProgressView : Control
     {
         private const int HeaderHeight = 58;
@@ -752,7 +775,7 @@ public sealed partial class Form1 : Form
                 graphics.DrawPath(outline, path);
             }
 
-            TextRenderer.DrawText(graphics, "📊  Tiến độ theo cấp HSK", TitleFont, new Rectangle(Padding, 16, Width - 2 * Padding, 28),
+            TextRenderer.DrawText(graphics, "📊  Tiến độ luyện gõ theo cấp HSK  ·  số từ đã gõ đúng", TitleFont, new Rectangle(Padding, 16, Width - 2 * Padding, 28),
                 TextColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
             const int columnGap = 36;
             var columnWidth = (Width - 2 * Padding - columnGap) / 2;
@@ -772,16 +795,16 @@ public sealed partial class Form1 : Form
                     graphics.FillPath(trackFill, trackPath);
                 }
 
-                if (row.Total > 0 && row.Studying > 0)
+                if (row.Total > 0 && row.TypedCorrect > 0)
                 {
-                    var filled = new RectangleF(track.X, track.Y, Math.Max(track.Height, track.Width * row.Studying / row.Total), track.Height);
+                    var filled = new RectangleF(track.X, track.Y, Math.Max(track.Height, track.Width * row.TypedCorrect / row.Total), track.Height);
                     using var barPath = RoundedMenuRenderer.CreateRoundedPath(filled, 5);
                     using var barFill = new SolidBrush(BarColors[index % BarColors.Length]);
                     graphics.FillPath(barFill, barPath);
                 }
 
-                var percent = row.Total == 0 ? 0 : row.Studying * 100.0 / row.Total;
-                TextRenderer.DrawText(graphics, $"{row.Studying}/{row.Total} từ • {percent:0}%", CountFont,
+                var percent = row.Total == 0 ? 0 : row.TypedCorrect * 100.0 / row.Total;
+                TextRenderer.DrawText(graphics, $"{row.TypedCorrect}/{row.Total} đúng • {percent:0}%", CountFont,
                     new Rectangle(left + columnWidth - countWidth, top, countWidth, 26),
                     MutedTextColor, TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
             }
@@ -1623,6 +1646,38 @@ public sealed partial class Form1 : Form
         {
             MessageBox.Show(this, $"Không thể lưu cỡ chữ: {ex.Message}", "Lỗi lưu cài đặt",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void LoadTypedCorrectWords()
+    {
+        if (!File.Exists(_typedCorrectWordsPath))
+        {
+            return;
+        }
+
+        var json = File.ReadAllText(_typedCorrectWordsPath, Encoding.UTF8);
+        var saved = JsonSerializer.Deserialize<List<string>>(json)
+            ?? throw new InvalidDataException("Tệp từ đã gõ đúng không chứa danh sách hợp lệ.");
+        var known = _words.Select(word => word.Chinese).ToHashSet(StringComparer.Ordinal);
+        _typedCorrectWords.UnionWith(saved.Where(known.Contains));
+    }
+
+    private void SaveTypedCorrectWords()
+    {
+        if (!_saveTypedCorrectWords)
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_typedCorrectWordsPath)!);
+            File.WriteAllText(_typedCorrectWordsPath, JsonSerializer.Serialize(_typedCorrectWords, JsonOptions), new UTF8Encoding(false));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Progress still counts for this session; it just will not be remembered.
         }
     }
 
@@ -2900,7 +2955,9 @@ public sealed partial class Form1 : Form
                 _incorrectWordCounts.Remove(wordKey);
             }
 
+            _typedCorrectWords.IntersectWith(remainingWordKeys);
             SaveMissedWords();
+            SaveTypedCorrectWords();
 
             _flashcardIndex = -1;
             _flashcardOrder.Clear();
@@ -5353,6 +5410,7 @@ public sealed partial class Form1 : Form
 
         var word = practiceWords[_questionIndex];
         _incorrectWordCounts[word.Chinese] = _incorrectWordCounts.GetValueOrDefault(word.Chinese) + 1;
+        _typedCorrectWords.Remove(word.Chinese);
         _practiceFeedback.Text = $"Đã bỏ qua. Đáp án: {FormatPracticeAnswer(word)}";
         _practiceFeedback.ForeColor = Color.DarkOrange;
         _answerChecked = true;
@@ -5412,8 +5470,10 @@ public sealed partial class Form1 : Form
         if (isCorrect)
         {
             _correctAnswerCount++;
-            // A right answer clears the word from the saved missed list.
+            // A right answer clears the word from the saved missed list and
+            // counts it towards its HSK level's progress.
             var wasMissed = _incorrectWordCounts.Remove(word.Chinese);
+            _typedCorrectWords.Add(word.Chinese);
             _practiceFeedback.Text = wasMissed
                 ? "Chính xác! Đã xóa từ này khỏi danh sách từ sai."
                 : "Chính xác! Giỏi lắm.";
@@ -5423,6 +5483,7 @@ public sealed partial class Form1 : Form
         {
             _wrongAnswerCount++;
             _incorrectWordCounts[word.Chinese] = _incorrectWordCounts.GetValueOrDefault(word.Chinese) + 1;
+            _typedCorrectWords.Remove(word.Chinese);
             _practiceFeedback.Text = timedOut
                 ? $"Hết giờ! Đáp án: {FormatPracticeAnswer(word)}"
                 : $"Chưa đúng. Đáp án: {FormatPracticeAnswer(word)}";
@@ -5441,6 +5502,7 @@ public sealed partial class Form1 : Form
     private void UpdatePracticeScore()
     {
         SaveMissedWords();
+        SaveTypedCorrectWords();
         _practiceScoreLabel.Text = $"Đúng: {_correctAnswerCount}     Sai: {_wrongAnswerCount}";
         _practiceScoreLabel.ForeColor = Color.FromArgb(48, 68, 88);
         _reviewIncorrectWordsButton.Text = $"Xem từ đã sai ({_incorrectWordCounts.Count})";
