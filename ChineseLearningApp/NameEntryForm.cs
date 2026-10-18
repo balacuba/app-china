@@ -1,55 +1,100 @@
 namespace ChineseLearningApp;
 
+// Welcome window asking for the user's name: a blue header with the app logo,
+// a rounded name box, rounded buttons and the author's details at the bottom.
 internal sealed class NameEntryForm : Form
 {
     private readonly TextBox _nameTextBox = new();
     private readonly Label _validationLabel = new();
+    private readonly Form1.RoundedPanel _nameFrame = new();
 
     public string EnteredName { get; private set; } = string.Empty;
 
     public NameEntryForm()
     {
-        Text = "Ứng dụng học tiếng trung của Tuấn Anh!";
+        Text = "Ứng dụng học tiếng trung của Tuấn Anh!";
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
-        ShowInTaskbar = false;
-        ClientSize = new Size(380, 190);
-        Font = new Font("Segoe UI", 10F);
+        ShowInTaskbar = true;
+        ClientSize = new Size(460, 438);
+        Font = new Font(Form1.UiFontName, 10F);
+        BackColor = Form1.SurfaceColor;
+
+        // Blue header: logo and welcome.
+        var header = new Panel { Dock = DockStyle.Top, Height = 120, BackColor = Form1.Accent };
+        var brand = new Form1.HeaderBrand
+        {
+            Text = "Học tiếng Trung",
+            Font = new Font("Segoe UI Semibold", 16F)
+        };
+        brand.Location = new Point((ClientSize.Width - brand.Width) / 2, 22);
+        var welcome = new Label
+        {
+            AutoSize = false,
+            Location = new Point(0, 74),
+            Size = new Size(ClientSize.Width, 24),
+            Text = "Chào mừng bạn! Cùng học tiếng Trung mỗi ngày nhé 🌱",
+            Font = new Font(Form1.UiFontName, 10F),
+            ForeColor = Color.FromArgb(219, 234, 254),
+            BackColor = Form1.Accent,
+            TextAlign = ContentAlignment.MiddleCenter
+        };
+        header.Controls.AddRange([brand, welcome]);
 
         var prompt = new Label
         {
             AutoSize = true,
-            Location = new Point(24, 22),
-            Text = "Tên bạn là gì ?"
+            Location = new Point(36, 144),
+            Text = "Tên bạn là gì?",
+            Font = new Font("Segoe UI Semibold", 11.5F),
+            ForeColor = Form1.TextColor
         };
-        _nameTextBox.Location = new Point(24, 56);
-        _nameTextBox.Size = new Size(332, 30);
+
+        // Rounded name box; the outline turns blue while typing.
+        _nameFrame.Location = new Point(36, 176);
+        _nameFrame.Size = new Size(ClientSize.Width - 72, 44);
+        // Pill-shaped: the radius is half the inner height.
+        _nameFrame.Radius = 20;
+        _nameFrame.FillColor = Form1.PageColor;
+        _nameFrame.OutlineColor = Form1.BorderColor;
+        _nameFrame.BackColor = Form1.SurfaceColor;
+        _nameTextBox.BorderStyle = BorderStyle.None;
+        _nameTextBox.BackColor = Form1.PageColor;
+        _nameTextBox.Font = new Font(Form1.UiFontName, 12F);
+        _nameTextBox.Location = new Point(20, 11);
+        _nameTextBox.Width = _nameFrame.Width - 40;
         _nameTextBox.MaxLength = 80;
         _nameTextBox.PlaceholderText = "Nhập tên của bạn";
+        _nameFrame.Controls.Add(_nameTextBox);
+        _nameTextBox.GotFocus += (_, _) => SetNameOutline(Form1.Accent, 2F);
+        _nameTextBox.LostFocus += (_, _) => SetNameOutline(Form1.BorderColor, 1.5F);
+        _nameTextBox.TextChanged += (_, _) => _validationLabel.Text = string.Empty;
 
         _validationLabel.AutoSize = true;
-        _validationLabel.ForeColor = Color.Firebrick;
-        _validationLabel.Location = new Point(24, 91);
+        _validationLabel.ForeColor = Form1.DangerText;
+        _validationLabel.Location = new Point(38, 226);
 
-        var continueButton = new Button
-        {
-            Location = new Point(190, 132),
-            Size = new Size(78, 32),
-            Text = "Tiếp tục"
-        };
-        continueButton.Click += ContinueButton_Click;
+        var continueButton = Form1.CreateButton("Bắt đầu học  →", ContinueButton_Click);
+        continueButton.AutoSize = false;
+        continueButton.Size = new Size(170, 42);
+        var cancelButton = Form1.CreateButton("Thoát", (_, _) => Close(), secondary: true);
+        cancelButton.AutoSize = false;
+        cancelButton.Size = new Size(100, 42);
+        // Pill-shaped like the name box.
+        ((Form1.RoundedButton)continueButton).Radius = 20;
+        ((Form1.RoundedButton)cancelButton).Radius = 20;
+        // Both buttons as one group, centred under the name box.
+        var buttonsLeft = _nameFrame.Left + (_nameFrame.Width - (cancelButton.Width + 12 + continueButton.Width)) / 2;
+        cancelButton.Location = new Point(buttonsLeft, 258);
+        continueButton.Location = new Point(cancelButton.Right + 12, 258);
+        cancelButton.DialogResult = DialogResult.Cancel;
 
-        var cancelButton = new Button
-        {
-            DialogResult = DialogResult.Cancel,
-            Location = new Point(278, 132),
-            Size = new Size(78, 32),
-            Text = "Thoát"
-        };
+        // Author's details along the bottom.
+        var footer = new AuthorFooter { Dock = DockStyle.Bottom, Height = 96 };
 
-        Controls.AddRange([prompt, _nameTextBox, _validationLabel, continueButton, cancelButton]);
+        Controls.AddRange([header, prompt, _nameFrame, _validationLabel, cancelButton, continueButton, footer]);
         AcceptButton = continueButton;
         CancelButton = cancelButton;
         // Start with the name from last time, selected so it can be retyped.
@@ -59,6 +104,95 @@ internal sealed class NameEntryForm : Form
             _nameTextBox.Focus();
             _nameTextBox.SelectAll();
         };
+    }
+
+    // "Made with ♥ by Tuấn Anh" over two rounded contact chips (phone, mail),
+    // on a soft band with a thin line on top.
+    private sealed class AuthorFooter : Control
+    {
+        private static readonly Font PlainFont = new(Form1.UiFontName, 10F);
+        private static readonly Font NameFont = new("Segoe UI Semibold", 10.5F);
+        private static readonly Font HeartFont = new("Segoe UI Emoji", 10F);
+        private static readonly Font ChipFont = new(Form1.UiFontName, 9.5F);
+        private static readonly Font ChipIconFont = new("Segoe UI Emoji", 9.5F);
+
+        private static readonly (string Icon, string Text, Color Fill, Color Ink)[] Chips =
+        [
+            ("📞", "0858344567", Color.FromArgb(220, 252, 231), Color.FromArgb(21, 128, 61)),
+            ("✉️", "camlinh.tk@gmail.com", Color.FromArgb(219, 234, 254), Color.FromArgb(29, 78, 216))
+        ];
+
+        public AuthorFooter()
+        {
+            SetStyle(
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw |
+                ControlStyles.UserPaint,
+                true);
+            BackColor = Form1.PageColor;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var graphics = e.Graphics;
+            graphics.Clear(BackColor);
+            graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using (var line = new Pen(Form1.BorderColor))
+            {
+                graphics.DrawLine(line, 0, 0, Width, 0);
+            }
+
+            // Line 1: "Made with ♥ by Tuấn Anh", centred, name in accent.
+            const TextFormatFlags flags = TextFormatFlags.NoPadding | TextFormatFlags.VerticalCenter;
+            var parts = new (string Text, Font Font, Color Color)[]
+            {
+                ("Made with ", PlainFont, Form1.MutedTextColor),
+                ("❤️", HeartFont, Color.FromArgb(225, 29, 72)),
+                (" by ", PlainFont, Form1.MutedTextColor),
+                ("Tuấn Anh", NameFont, Form1.Accent)
+            };
+            var widths = parts.Select(part => TextRenderer.MeasureText(graphics, part.Text, part.Font, Size.Empty, flags).Width).ToArray();
+            var x = (Width - widths.Sum()) / 2;
+            for (var index = 0; index < parts.Length; index++)
+            {
+                TextRenderer.DrawText(graphics, parts[index].Text, parts[index].Font,
+                    new Rectangle(x, 14, widths[index] + 2, 24), parts[index].Color, flags);
+                x += widths[index];
+            }
+
+            // Line 2: rounded contact chips side by side.
+            const int chipHeight = 28;
+            const int gap = 10;
+            var chipWidths = Chips.Select(chip =>
+                TextRenderer.MeasureText(graphics, chip.Icon, ChipIconFont, Size.Empty, flags).Width + 6 +
+                TextRenderer.MeasureText(graphics, chip.Text, ChipFont, Size.Empty, flags).Width + 28).ToArray();
+            x = (Width - chipWidths.Sum() - gap * (Chips.Length - 1)) / 2;
+            const int top = 50;
+            for (var index = 0; index < Chips.Length; index++)
+            {
+                var (icon, text, fill, ink) = Chips[index];
+                var chip = new RectangleF(x, top, chipWidths[index], chipHeight);
+                using (var path = Form1.RoundedMenuRenderer.CreateRoundedPath(chip, chipHeight / 2F))
+                using (var brush = new SolidBrush(fill))
+                {
+                    graphics.FillPath(brush, path);
+                }
+
+                var iconWidth = TextRenderer.MeasureText(graphics, icon, ChipIconFont, Size.Empty, flags).Width;
+                TextRenderer.DrawText(graphics, icon, ChipIconFont, new Rectangle(x + 14, top, iconWidth + 2, chipHeight), ink, flags);
+                TextRenderer.DrawText(graphics, text, ChipFont,
+                    new Rectangle(x + 14 + iconWidth + 6, top, chipWidths[index], chipHeight), ink, flags);
+                x += chipWidths[index] + gap;
+            }
+        }
+    }
+
+    private void SetNameOutline(Color color, float width)
+    {
+        _nameFrame.OutlineColor = color;
+        _nameFrame.OutlineWidth = width;
+        _nameFrame.Invalidate();
     }
 
     private void ContinueButton_Click(object? sender, EventArgs e)

@@ -13,24 +13,24 @@ namespace ChineseLearningApp;
 public sealed partial class Form1 : Form
 {
     // Theme: one place for the app's colours and fonts.
-    private static readonly Color Accent = Color.FromArgb(37, 99, 235);
+    internal static readonly Color Accent = Color.FromArgb(37, 99, 235);
     private static readonly Color AccentHover = Color.FromArgb(29, 78, 216);
     private static readonly Color AccentPressed = Color.FromArgb(30, 64, 175);
-    private static readonly Color AccentSoft = Color.FromArgb(232, 240, 254);
+    internal static readonly Color AccentSoft = Color.FromArgb(232, 240, 254);
     private static readonly Color AccentSoftHover = Color.FromArgb(214, 228, 253);
     private static readonly Color DangerSoft = Color.FromArgb(254, 236, 236);
     private static readonly Color DangerSoftHover = Color.FromArgb(252, 218, 218);
-    private static readonly Color DangerText = Color.FromArgb(185, 28, 28);
-    private static readonly Color PageColor = Color.FromArgb(243, 245, 249);
-    private static readonly Color SurfaceColor = Color.White;
-    private static readonly Color BorderColor = Color.FromArgb(226, 232, 240);
+    internal static readonly Color DangerText = Color.FromArgb(185, 28, 28);
+    internal static readonly Color PageColor = Color.FromArgb(243, 245, 249);
+    internal static readonly Color SurfaceColor = Color.White;
+    internal static readonly Color BorderColor = Color.FromArgb(226, 232, 240);
     private static readonly Color HeaderRowColor = Color.FromArgb(241, 245, 249);
     private static readonly Color StripeRowColor = Color.FromArgb(249, 250, 252);
-    private static readonly Color TextColor = Color.FromArgb(30, 41, 59);
-    private static readonly Color BodyTextColor = Color.FromArgb(51, 65, 85);
-    private static readonly Color MutedTextColor = Color.FromArgb(100, 116, 139);
+    internal static readonly Color TextColor = Color.FromArgb(30, 41, 59);
+    internal static readonly Color BodyTextColor = Color.FromArgb(51, 65, 85);
+    internal static readonly Color MutedTextColor = Color.FromArgb(100, 116, 139);
     private static readonly Color SuccessColor = Color.FromArgb(22, 128, 61);
-    private const string UiFontName = "Segoe UI";
+    internal const string UiFontName = "Segoe UI";
 
     private enum ButtonKind
     {
@@ -4136,7 +4136,7 @@ public sealed partial class Form1 : Form
 
     // App logo for the header: a white circle with "汉" in accent blue, then
     // the app name (Text) in white.
-    private sealed class HeaderBrand : Control
+    internal sealed class HeaderBrand : Control
     {
         private const int Logo = 38;
         private const int Gap = 12;
@@ -4472,7 +4472,7 @@ public sealed partial class Form1 : Form
 
     // A panel drawn as an anti-aliased rounded rectangle with an outline and an
     // optional accent strip along the top (used for cards and input frames).
-    private sealed class RoundedPanel : Panel
+    internal sealed class RoundedPanel : Panel
     {
         public int Radius { get; set; } = 12;
         public Color FillColor { get; set; } = SurfaceColor;
@@ -4538,9 +4538,10 @@ public sealed partial class Form1 : Form
 
     // A flat button drawn with anti-aliased rounded corners; colours come from
     // BackColor and FlatAppearance (hover/pressed), as set by StyleButton.
-    private sealed class RoundedButton : Button
+    internal sealed class RoundedButton : Button
     {
-        private const int Radius = 10;
+        // Corner radius; a value of half the height gives a pill shape.
+        public int Radius { get; set; } = 10;
         private bool _hovered;
         private bool _pressed;
 
@@ -4640,7 +4641,7 @@ public sealed partial class Form1 : Form
 
     // Menu look matching the rounded buttons: white body with a thin border,
     // rounded soft-blue hover, and the checked item in bold accent text.
-    private sealed class RoundedMenuRenderer : ToolStripProfessionalRenderer
+    internal sealed class RoundedMenuRenderer : ToolStripProfessionalRenderer
     {
         public static System.Drawing.Drawing2D.GraphicsPath CreateRoundedPath(RectangleF bounds, float radius)
         {
@@ -6271,7 +6272,7 @@ public sealed partial class Form1 : Form
             TextAlign = ContentAlignment.MiddleCenter
         };
 
-    private static Button CreateButton(
+    internal static Button CreateButton(
         string text,
         EventHandler onClick,
         bool secondary = false,
