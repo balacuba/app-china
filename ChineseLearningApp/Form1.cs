@@ -1246,11 +1246,17 @@ public sealed partial class Form1 : Form
         topBar.Controls.Add(title, 1, 0);
         topBar.Controls.Add(topRightTools, 2, 0);
         // The missed-words button text grows with its count; keep both side columns in step.
-        topRightTools.SizeChanged += (_, _) =>
+        // The panel cannot grow past its fixed column, so size the columns from the
+        // tools' preferred width whenever the button resizes.
+        void SyncToolsWidth()
         {
-            topBar.ColumnStyles[0].Width = topRightTools.Width;
-            topBar.ColumnStyles[2].Width = topRightTools.Width;
-        };
+            var width = topRightTools.GetPreferredSize(Size.Empty).Width;
+            topBar.ColumnStyles[0].Width = width;
+            topBar.ColumnStyles[2].Width = width;
+        }
+
+        _reviewIncorrectWordsButton.SizeChanged += (_, _) => SyncToolsWidth();
+        SyncToolsWidth();
 
         layout.Controls.Add(topBar, 0, 0);
         layout.Controls.Add(_practiceMeaning, 0, 1);
@@ -2772,11 +2778,19 @@ public sealed partial class Form1 : Form
                     : _hovered
                         ? FlatAppearance.MouseOverBackColor
                         : BackColor;
-            var bounds = new RectangleF(0.5F, 0.5F, Width - 1.5F, Height - 1.5F);
+            var bounds = new RectangleF(1F, 1F, Width - 2.5F, Height - 2.5F);
             using (var path = CreateRoundedPath(bounds, Math.Min(Radius, (int)(Height / 2F))))
             using (var brush = new SolidBrush(fill.IsEmpty ? BackColor : fill))
             {
                 graphics.FillPath(brush, path);
+                var borderColor = !Enabled
+                    ? Color.FromArgb(203, 213, 225)
+                    : FlatAppearance.BorderColor.IsEmpty ? BorderColor : FlatAppearance.BorderColor;
+                using (var borderPen = new Pen(borderColor, 1.5F))
+                {
+                    graphics.DrawPath(borderPen, path);
+                }
+
                 if (Focused && ShowFocusCues)
                 {
                     using var focusPen = new Pen(Color.FromArgb(147, 197, 253), 2F);
@@ -3963,12 +3977,14 @@ public sealed partial class Form1 : Form
     // Flat, borderless buttons with hover/pressed colours shared across the app.
     private static void StyleButton(Button button, ButtonKind kind)
     {
-        var (back, hover, pressed, fore) = kind switch
+        var (back, hover, pressed, fore, border) = kind switch
         {
-            ButtonKind.Primary => (Accent, AccentHover, AccentPressed, Color.White),
-            ButtonKind.Danger => (DangerSoft, DangerSoftHover, DangerSoftHover, DangerText),
-            _ => (AccentSoft, AccentSoftHover, AccentSoftHover, Accent)
+            ButtonKind.Primary => (Accent, AccentHover, AccentPressed, Color.White, AccentPressed),
+            ButtonKind.Danger => (DangerSoft, DangerSoftHover, DangerSoftHover, DangerText, Color.FromArgb(248, 150, 150)),
+            _ => (AccentSoft, AccentSoftHover, AccentSoftHover, Accent, Color.FromArgb(147, 187, 250))
         };
+        // RoundedButton draws this as its outline so soft buttons stand out on light pages.
+        button.FlatAppearance.BorderColor = border;
         button.AutoSize = true;
         button.AutoSizeMode = AutoSizeMode.GrowAndShrink;
         button.BackColor = back;
