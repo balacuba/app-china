@@ -72,7 +72,8 @@ public sealed partial class Form1 : Form
     private readonly TextBox _searchBox = new();
     private readonly Label _countLabel = new();
     private readonly Panel _flashcardHost = new();
-    private readonly Panel _flashcardCard = new();
+    private readonly RoundedPanel _flashcardCard = new();
+    private readonly RoundedPanel _answerFrame = new();
     private readonly Panel _flashcardBackLayout = new();
     private readonly Label _flashcardFace = new();
     private readonly Label _flashcardPinyin = new();
@@ -853,8 +854,8 @@ public sealed partial class Form1 : Form
         }
 
         _practiceMeaning.Font = new Font("Segoe UI", exampleMode ? 18F : 24F, FontStyle.Bold);
-        _answerBox.Anchor = exampleMode ? AnchorStyles.Left | AnchorStyles.Right : AnchorStyles.None;
-        _answerBox.Width = 430;
+        _answerFrame.Anchor = exampleMode ? AnchorStyles.Left | AnchorStyles.Right : AnchorStyles.None;
+        _answerFrame.Width = 430;
         UpdatePracticeHint();
         StartPracticeWithWords(PracticeWords.ToList());
     }
@@ -1052,15 +1053,13 @@ public sealed partial class Form1 : Form
         _flashcardHost.Dock = DockStyle.Fill;
         _flashcardHost.BackColor = Color.Transparent;
         _flashcardHost.Resize += (_, _) => CenterFlashcardCard();
-        // White card with a thin border and an accent strip along the top.
-        _flashcardCard.BackColor = BorderColor;
-        _flashcardCard.BorderStyle = BorderStyle.None;
-        _flashcardCard.Padding = new Padding(1, 6, 1, 1);
-        _flashcardCard.Paint += (_, e) =>
-        {
-            using var strip = new SolidBrush(Accent);
-            e.Graphics.FillRectangle(strip, 0, 0, _flashcardCard.Width, 6);
-        };
+        // Rounded white card with a thin border and an accent strip along the top;
+        // the padding keeps the content inside the rounded corners.
+        _flashcardCard.Radius = 16;
+        _flashcardCard.StripColor = Accent;
+        _flashcardCard.StripHeight = 6;
+        _flashcardCard.OutlineColor = Color.FromArgb(203, 213, 225);
+        _flashcardCard.Padding = new Padding(10, 14, 10, 10);
         _flashcardCard.Cursor = Cursors.Hand;
         _flashcardCard.Click += ToggleFlashcard;
         _flashcardFace.BackColor = SurfaceColor;
@@ -1156,15 +1155,46 @@ public sealed partial class Form1 : Form
         _practiceEnglishMeaning.Font = new Font("Segoe UI", 15F);
         _practiceEnglishMeaning.ForeColor = MutedTextColor;
         _practiceEnglishMeaning.TextAlign = ContentAlignment.MiddleCenter;
-        _answerBox.Anchor = AnchorStyles.None;
+        // The borderless answer box sits centred inside a rounded frame whose outline
+        // turns accent while typing and grey when the box is disabled.
         _answerBox.Font = new Font("Microsoft YaHei UI", 22F);
-        _answerBox.BorderStyle = BorderStyle.FixedSingle;
+        _answerBox.BorderStyle = BorderStyle.None;
         _answerBox.BackColor = SurfaceColor;
         _answerBox.ForeColor = TextColor;
         _answerBox.ImeMode = ImeMode.On;
         _answerBox.MaxLength = 100;
-        _answerBox.Size = new Size(430, 48);
         _answerBox.TextAlign = HorizontalAlignment.Center;
+        _answerFrame.Anchor = AnchorStyles.None;
+        _answerFrame.Size = new Size(430, 60);
+        _answerFrame.Radius = 12;
+        _answerFrame.OutlineColor = Color.FromArgb(148, 163, 184);
+        _answerFrame.Controls.Add(_answerBox);
+        _answerFrame.Layout += (_, _) =>
+        {
+            const int sidePadding = 16;
+            var height = _answerBox.PreferredHeight;
+            _answerBox.Bounds = new Rectangle(
+                sidePadding,
+                Math.Max(0, (_answerFrame.ClientSize.Height - height) / 2),
+                Math.Max(10, _answerFrame.ClientSize.Width - sidePadding * 2),
+                height);
+        };
+        _answerFrame.Click += (_, _) => _answerBox.Focus();
+        void UpdateAnswerFrame()
+        {
+            var background = _answerBox.Enabled ? SurfaceColor : Color.FromArgb(241, 245, 249);
+            _answerBox.BackColor = background;
+            _answerFrame.FillColor = background;
+            _answerFrame.OutlineColor = !_answerBox.Enabled
+                ? Color.FromArgb(203, 213, 225)
+                : _answerBox.Focused ? Accent : Color.FromArgb(148, 163, 184);
+            _answerFrame.OutlineWidth = _answerBox.Focused ? 2F : 1.5F;
+            _answerFrame.Invalidate();
+        }
+
+        _answerBox.Enter += (_, _) => UpdateAnswerFrame();
+        _answerBox.Leave += (_, _) => UpdateAnswerFrame();
+        _answerBox.EnabledChanged += (_, _) => UpdateAnswerFrame();
         _answerBox.TextChanged += AnswerBox_TextChanged;
         _answerBox.KeyDown += AnswerBox_KeyDown;
 
@@ -1299,7 +1329,7 @@ public sealed partial class Form1 : Form
         layout.Controls.Add(topBar, 0, 0);
         layout.Controls.Add(_practiceMeaning, 0, 1);
         layout.Controls.Add(_practiceEnglishMeaning, 0, 2);
-        layout.Controls.Add(_answerBox, 0, 3);
+        layout.Controls.Add(_answerFrame, 0, 3);
         layout.Controls.Add(practiceActions, 0, 4);
         layout.Controls.Add(_practiceTimerLabel, 0, 5);
         layout.Controls.Add(_practiceScoreLabel, 0, 6);
@@ -2755,6 +2785,72 @@ public sealed partial class Form1 : Form
         }
 
         graphics.Clip = clip;
+    }
+
+    // A panel drawn as an anti-aliased rounded rectangle with an outline and an
+    // optional accent strip along the top (used for cards and input frames).
+    private sealed class RoundedPanel : Panel
+    {
+        public int Radius { get; set; } = 12;
+        public Color FillColor { get; set; } = SurfaceColor;
+        public Color OutlineColor { get; set; } = BorderColor;
+        public float OutlineWidth { get; set; } = 1.5F;
+        public Color StripColor { get; set; } = Color.Empty;
+        public int StripHeight { get; set; }
+
+        public RoundedPanel()
+        {
+            SetStyle(
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw |
+                ControlStyles.UserPaint,
+                true);
+        }
+
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var graphics = e.Graphics;
+            graphics.Clear(GetSolidParentColor());
+            graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            var inset = OutlineWidth / 2F;
+            var bounds = new RectangleF(inset, inset, Width - OutlineWidth - 1, Height - OutlineWidth - 1);
+            using var path = RoundedMenuRenderer.CreateRoundedPath(bounds, Math.Min(Radius, Height / 2F));
+            using (var fill = new SolidBrush(FillColor))
+            {
+                graphics.FillPath(fill, path);
+            }
+
+            if (StripHeight > 0 && !StripColor.IsEmpty)
+            {
+                var clip = graphics.Clip;
+                graphics.SetClip(path);
+                using var strip = new SolidBrush(StripColor);
+                graphics.FillRectangle(strip, 0, 0, Width, StripHeight);
+                graphics.Clip = clip;
+            }
+
+            using var outline = new Pen(OutlineColor, OutlineWidth);
+            graphics.DrawPath(outline, path);
+        }
+
+        // Corners show the first non-transparent background up the parent chain.
+        private Color GetSolidParentColor()
+        {
+            for (var parent = Parent; parent is not null; parent = parent.Parent)
+            {
+                if (parent.BackColor.A == 255)
+                {
+                    return parent.BackColor;
+                }
+            }
+
+            return PageColor;
+        }
     }
 
     // A flat button drawn with anti-aliased rounded corners; colours come from
