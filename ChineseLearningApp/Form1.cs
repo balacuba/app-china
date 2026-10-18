@@ -112,7 +112,7 @@ public sealed partial class Form1 : Form
     private readonly Label _practiceMeaning = new();
     private readonly HighlightLabel _practiceEnglishMeaning = new();
     private readonly HighlightLabel _practiceFeedback = new();
-    private readonly Label _practiceTimerLabel = new();
+    private readonly CountdownClock _practiceClock = new();
     private readonly Label _practiceHint = new();
     private readonly RoundedButton _reviewIncorrectWordsButton = new();
     private readonly RoundedButton _pausePracticeButton = new();
@@ -1921,7 +1921,7 @@ public sealed partial class Form1 : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 11));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 20));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 104)); // countdown clock
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 0)); // the score now lives on Home
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 0));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 15));
@@ -2017,10 +2017,7 @@ public sealed partial class Form1 : Form
         checkPracticeMode = AttachRoundedMenu(practiceModeBox, practiceModes, SelectPracticeMode);
         SelectPracticeMode(0);
         practiceActions.Controls.AddRange([continueStudyButton, _pausePracticeButton, _skipPracticeButton]);
-        _practiceTimerLabel.Dock = DockStyle.Fill;
-        _practiceTimerLabel.Font = new Font("Segoe UI", 12F, FontStyle.Bold);
-        _practiceTimerLabel.ForeColor = Accent;
-        _practiceTimerLabel.TextAlign = ContentAlignment.MiddleCenter;
+        _practiceClock.Dock = DockStyle.Fill;
         _reviewIncorrectWordsButton.Text = "Xem từ đã sai";
         StyleButton(_reviewIncorrectWordsButton, ButtonKind.Secondary);
         _reviewIncorrectWordsButton.Click += ReviewIncorrectWordsButton_Click;
@@ -2071,7 +2068,7 @@ public sealed partial class Form1 : Form
         layout.Controls.Add(_practiceEnglishMeaning, 0, 2);
         layout.Controls.Add(_answerFrame, 0, 3);
         layout.Controls.Add(practiceActions, 0, 4);
-        layout.Controls.Add(_practiceTimerLabel, 0, 5);
+        layout.Controls.Add(_practiceClock, 0, 5);
         layout.Controls.Add(_practiceFeedback, 0, 8);
         layout.Controls.Add(_practiceHint, 0, 9);
         page.Padding = new Padding(20);
@@ -4148,6 +4145,126 @@ public sealed partial class Form1 : Form
         }
     }
 
+    // Round countdown clock for typing practice: a clock face with tick marks,
+    // an arc of the time left that turns from green to amber to red, and the
+    // seconds left in the middle. It can also show a paused state or nothing.
+    private sealed class CountdownClock : Control
+    {
+        private static readonly Font SecondsFont = new("Segoe UI Semibold", 20F);
+        private static readonly Font CaptionFont = new(UiFontName, 8.5F);
+        private static readonly Color Green = Color.FromArgb(34, 197, 94);
+        private static readonly Color Amber = Color.FromArgb(245, 158, 11);
+        private static readonly Color Red = Color.FromArgb(239, 68, 68);
+        private float _fraction;
+        private string _value = "";
+        private string _caption = "";
+        private bool _paused;
+        private bool _visibleFace;
+
+        public CountdownClock()
+        {
+            SetStyle(
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw |
+                ControlStyles.UserPaint,
+                true);
+            BackColor = SurfaceColor;
+        }
+
+        public void SetRemaining(long remainingMilliseconds, long totalMilliseconds)
+        {
+            _visibleFace = true;
+            _paused = false;
+            _fraction = totalMilliseconds <= 0 ? 0 : Math.Clamp(remainingMilliseconds / (float)totalMilliseconds, 0, 1);
+            _value = $"{(int)Math.Ceiling(Math.Max(0, remainingMilliseconds) / 1000d)}";
+            _caption = "giây";
+            Invalidate();
+        }
+
+        // Paused: the arc stays where it was and turns grey.
+        public void ShowPaused(int? secondsLeft)
+        {
+            _visibleFace = true;
+            _paused = true;
+            _value = secondsLeft is { } seconds ? $"{seconds}" : "⏸";
+            _caption = "tạm dừng";
+            Invalidate();
+        }
+
+        public void Clear()
+        {
+            _visibleFace = false;
+            Invalidate();
+        }
+
+        // Green while there is plenty of time, through amber, to red at the end.
+        private static Color Blend(Color from, Color to, float amount) => Color.FromArgb(
+            (int)(from.R + (to.R - from.R) * amount),
+            (int)(from.G + (to.G - from.G) * amount),
+            (int)(from.B + (to.B - from.B) * amount));
+
+        private Color ArcColor => _paused
+            ? Color.FromArgb(148, 163, 184)
+            : _fraction > 0.5F ? Blend(Amber, Green, (_fraction - 0.5F) * 2) : Blend(Red, Amber, _fraction * 2);
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var graphics = e.Graphics;
+            graphics.Clear(BackColor);
+            if (!_visibleFace)
+            {
+                return;
+            }
+
+            graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            var size = Math.Min(Width, Height) - 6;
+            var face = new RectangleF((Width - size) / 2F, (Height - size) / 2F, size, size);
+            const float ring = 7F;
+            var arcBounds = RectangleF.Inflate(face, -ring / 2, -ring / 2);
+
+            // Soft face with twelve clock ticks.
+            using (var faceFill = new SolidBrush(Color.FromArgb(248, 250, 252)))
+            {
+                graphics.FillEllipse(faceFill, face);
+            }
+
+            var center = new PointF(face.X + face.Width / 2, face.Y + face.Height / 2);
+            using (var tick = new Pen(Color.FromArgb(203, 213, 225), 1.6F) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round })
+            {
+                var outer = face.Width / 2 - ring - 4;
+                for (var hour = 0; hour < 12; hour++)
+                {
+                    var angle = hour * Math.PI / 6;
+                    var inner = outer - (hour % 3 == 0 ? 6 : 3.5F);
+                    graphics.DrawLine(tick,
+                        center.X + (float)Math.Sin(angle) * inner, center.Y - (float)Math.Cos(angle) * inner,
+                        center.X + (float)Math.Sin(angle) * outer, center.Y - (float)Math.Cos(angle) * outer);
+                }
+            }
+
+            // Track, then the time left as an arc from 12 o'clock, clockwise.
+            using (var track = new Pen(Color.FromArgb(226, 232, 240), ring))
+            {
+                graphics.DrawEllipse(track, arcBounds);
+            }
+
+            if (_fraction > 0)
+            {
+                using var arc = new Pen(ArcColor, ring) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round };
+                graphics.DrawArc(arc, arcBounds, -90, 360 * _fraction);
+            }
+
+            var valueColor = _paused ? MutedTextColor : ArcColor;
+            TextRenderer.DrawText(graphics, _value, SecondsFont,
+                new Rectangle((int)face.X, (int)(center.Y - 22), (int)face.Width, 34),
+                valueColor, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            TextRenderer.DrawText(graphics, _caption, CaptionFont,
+                new Rectangle((int)face.X, (int)(center.Y + 11), (int)face.Width, 16),
+                MutedTextColor, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        }
+    }
+
     // A TabControl without its tab strip or border: the pages fill the whole
     // control at any size. Pages open from the Home cards.
     private sealed class PageHost : TabControl
@@ -5282,7 +5399,7 @@ public sealed partial class Form1 : Form
             _practiceMeaning.Text = "Chưa chọn từ học";
             _practiceEnglishMeaning.Text = string.Empty;
             _practiceFeedback.Text = "Tích chọn các từ trong danh sách để bắt đầu luyện gõ.";
-            _practiceTimerLabel.Text = string.Empty;
+            _practiceClock.Clear();
             UpdatePracticeScore();
             _answerBox.Clear();
             _answerBox.Enabled = false;
@@ -5709,9 +5826,9 @@ public sealed partial class Form1 : Form
 
             _answerBox.Enabled = false;
             _pausePracticeButton.Text = "Tiếp tục";
-            _practiceTimerLabel.Text = _answerChecked
-                ? "Đã tạm dừng"
-                : $"Đã tạm dừng · còn {Math.Max(0, (int)Math.Ceiling((PracticeDurationMilliseconds - _questionStopwatch.ElapsedMilliseconds) / 1000d))} giây";
+            _practiceClock.ShowPaused(_answerChecked
+                ? null
+                : Math.Max(0, (int)Math.Ceiling((PracticeDurationMilliseconds - _questionStopwatch.ElapsedMilliseconds) / 1000d)));
             return;
         }
 
@@ -5763,9 +5880,7 @@ public sealed partial class Form1 : Form
             return;
         }
 
-        var remainingSeconds = (int)Math.Ceiling(remainingMilliseconds / 1000d);
-        _practiceTimerLabel.Text = $"Thời gian còn lại: {remainingSeconds} giây";
-        _practiceTimerLabel.ForeColor = remainingSeconds <= 3 ? Color.Firebrick : Accent;
+        _practiceClock.SetRemaining(remainingMilliseconds, PracticeDurationMilliseconds);
     }
 
     private static string FormatEnglishMeaning(string english) =>
