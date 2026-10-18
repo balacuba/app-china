@@ -1054,13 +1054,12 @@ public sealed partial class Form1 : Form
         _flashcardHost.Dock = DockStyle.Fill;
         _flashcardHost.BackColor = Color.Transparent;
         _flashcardHost.Resize += (_, _) => CenterFlashcardCard();
-        // Rounded white card with a thin border and an accent strip along the top;
-        // the padding keeps the content inside the rounded corners.
+        // Rounded white card with an accent outline all around; the padding keeps
+        // the content inside the rounded corners.
         _flashcardCard.Radius = 28;
-        _flashcardCard.StripColor = Accent;
-        _flashcardCard.StripHeight = 6;
-        _flashcardCard.OutlineColor = Color.FromArgb(203, 213, 225);
-        _flashcardCard.Padding = new Padding(16, 18, 16, 16);
+        _flashcardCard.OutlineColor = Accent;
+        _flashcardCard.OutlineWidth = 2.5F;
+        _flashcardCard.Padding = new Padding(16);
         _flashcardCard.Cursor = Cursors.Hand;
         _flashcardCard.Click += ToggleFlashcard;
         _flashcardFace.BackColor = SurfaceColor;
