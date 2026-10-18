@@ -59,6 +59,23 @@ internal sealed class NameEntryForm : Form
         close.MouseLeave += (_, _) => close.ForeColor = Color.FromArgb(219, 234, 254);
         close.Click += (_, _) => Close();
         header.Controls.AddRange([brand, welcome, close]);
+        // Playful icons scattered on the blue around the logo.
+        var decorationFont = new Font("Segoe UI Emoji", 15F);
+        var decorations = new (string Icon, Point At)[]
+        {
+            ("🏮", new Point(26, 16)),
+            ("🐼", new Point(70, 44)),
+            ("🥟", new Point(376, 44)),
+            ("🎋", new Point(362, 12))
+        };
+        header.Paint += (_, e) =>
+        {
+            foreach (var (icon, at) in decorations)
+            {
+                TextRenderer.DrawText(e.Graphics, icon, decorationFont, at, Color.FromArgb(191, 219, 254));
+            }
+        };
+        header.Disposed += (_, _) => decorationFont.Dispose();
         foreach (Control dragArea in new Control[] { header, brand, welcome })
         {
             dragArea.MouseDown += (_, e) =>
@@ -90,6 +107,15 @@ internal sealed class NameEntryForm : Form
             ForeColor = Form1.TextColor,
             BackColor = Form1.SurfaceColor
         };
+        var wave = new Label
+        {
+            AutoSize = true,
+            Location = new Point(prompt.Left + prompt.PreferredWidth + 4, 28),
+            Text = "👋",
+            Font = new Font("Segoe UI Emoji", 12F),
+            ForeColor = Color.FromArgb(234, 179, 8),
+            BackColor = Form1.SurfaceColor
+        };
 
         // Rounded name box; the outline turns blue while typing.
         _nameFrame.Location = new Point(36, 62);
@@ -105,7 +131,7 @@ internal sealed class NameEntryForm : Form
         _nameTextBox.Location = new Point(20, 11);
         _nameTextBox.Width = _nameFrame.Width - 40;
         _nameTextBox.MaxLength = 80;
-        _nameTextBox.PlaceholderText = "Nhập tên của bạn";
+        _nameTextBox.PlaceholderText = "Nhập tên của bạn ✍️";
         _nameFrame.Controls.Add(_nameTextBox);
         _nameTextBox.GotFocus += (_, _) => SetNameOutline(Form1.Accent, 2F);
         _nameTextBox.LostFocus += (_, _) => SetNameOutline(Form1.BorderColor, 1.5F);
@@ -116,10 +142,10 @@ internal sealed class NameEntryForm : Form
         _validationLabel.Location = new Point(38, 110);
         _validationLabel.BackColor = Form1.SurfaceColor;
 
-        var continueButton = Form1.CreateButton("Bắt đầu học  →", ContinueButton_Click);
+        var continueButton = Form1.CreateButton("🚀  Bắt đầu học", ContinueButton_Click);
         continueButton.AutoSize = false;
         continueButton.Size = new Size(170, 42);
-        var cancelButton = Form1.CreateButton("Thoát", (_, _) => Close(), secondary: true);
+        var cancelButton = Form1.CreateButton("👋  Thoát", (_, _) => Close(), secondary: true);
         cancelButton.AutoSize = false;
         cancelButton.Size = new Size(100, 42);
         // Pill-shaped like the name box.
@@ -134,7 +160,7 @@ internal sealed class NameEntryForm : Form
         // Author's details along the bottom.
         var footer = new AuthorFooter { Dock = DockStyle.Bottom };
 
-        body.Controls.AddRange([prompt, _nameFrame, _validationLabel, cancelButton, continueButton]);
+        body.Controls.AddRange([prompt, wave, _nameFrame, _validationLabel, cancelButton, continueButton]);
         Controls.AddRange([header, body, footer]);
         AcceptButton = continueButton;
         CancelButton = cancelButton;
