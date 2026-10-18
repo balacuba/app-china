@@ -684,7 +684,9 @@ public sealed partial class Form1 : Form
         ApplyColumnOrder();
         foreach (DataGridViewColumn column in _grid.Columns)
         {
-            column.Visible = !_columnVisibility.TryGetValue(column.Name, out var visible) || visible;
+            // The study tick column is hidden: words are picked from the Tiếng Trung header menu.
+            column.Visible = column.Name != nameof(VocabularyWord.IsSelected) &&
+                (!_columnVisibility.TryGetValue(column.Name, out var visible) || visible);
             _columnVisibility[column.Name] = column.Visible;
             column.Tag = column.HeaderText;
             column.SortMode = DataGridViewColumnSortMode.NotSortable;
@@ -726,7 +728,7 @@ public sealed partial class Form1 : Form
         var hint = new Label
         {
             Dock = DockStyle.Fill,
-            Text = "Tích chọn những từ muốn học. Flashcard và luyện gõ chỉ dùng các từ đã tích. Bấm tiêu đề “Tiếng Trung” để tích / bỏ tích tất cả các từ đang hiển thị sau khi tìm kiếm và lọc.",
+            Text = "Bấm tiêu đề “Tiếng Trung” để chọn từ muốn học (theo tìm kiếm và lọc HSK). Flashcard và luyện gõ chỉ dùng các từ đã chọn.",
             ForeColor = MutedTextColor,
             TextAlign = ContentAlignment.MiddleLeft
         };
@@ -846,7 +848,8 @@ public sealed partial class Form1 : Form
         columnChecks.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         columnChecks.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         var checkIndex = 0;
-        foreach (DataGridViewColumn column in _grid.Columns)
+        foreach (DataGridViewColumn column in _grid.Columns.Cast<DataGridViewColumn>()
+                     .Where(column => column.Name != nameof(VocabularyWord.IsSelected)))
         {
             var checkBox = new RoundedCheckBox
             {
@@ -1122,6 +1125,7 @@ public sealed partial class Form1 : Form
         list.BeginUpdate();
         list.Items.Clear();
         foreach (DataGridViewColumn column in _grid.Columns.Cast<DataGridViewColumn>()
+                     .Where(column => column.Name != nameof(VocabularyWord.IsSelected))
                      .OrderBy(column => column.DisplayIndex))
         {
             list.Items.Add(column);
@@ -1243,7 +1247,9 @@ public sealed partial class Form1 : Form
 
     private void ApplyColumnOrderFromList(ListBox list)
     {
-        var orderedNames = list.Items.Cast<DataGridViewColumn>().Select(column => column.Name).ToList();
+        // The hidden study tick column stays first.
+        var orderedNames = list.Items.Cast<DataGridViewColumn>().Select(column => column.Name)
+            .Prepend(nameof(VocabularyWord.IsSelected)).ToList();
         ApplyColumnOrder(orderedNames);
     }
 
