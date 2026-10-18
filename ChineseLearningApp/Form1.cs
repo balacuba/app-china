@@ -113,7 +113,6 @@ public sealed partial class Form1 : Form
     private readonly HighlightLabel _practiceEnglishMeaning = new();
     private readonly HighlightLabel _practiceFeedback = new();
     private readonly Label _practiceTimerLabel = new();
-    private readonly Label _practiceScoreLabel = new();
     private readonly Label _practiceHint = new();
     private readonly RoundedButton _reviewIncorrectWordsButton = new();
     private readonly RoundedButton _pausePracticeButton = new();
@@ -1923,7 +1922,7 @@ public sealed partial class Form1 : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 20));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 0)); // the score now lives on Home
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 0));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 15));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 9));
@@ -2022,9 +2021,6 @@ public sealed partial class Form1 : Form
         _practiceTimerLabel.Font = new Font("Segoe UI", 12F, FontStyle.Bold);
         _practiceTimerLabel.ForeColor = Accent;
         _practiceTimerLabel.TextAlign = ContentAlignment.MiddleCenter;
-        _practiceScoreLabel.Dock = DockStyle.Fill;
-        _practiceScoreLabel.Font = new Font("Segoe UI", 12F, FontStyle.Bold);
-        _practiceScoreLabel.TextAlign = ContentAlignment.MiddleCenter;
         _reviewIncorrectWordsButton.Text = "Xem từ đã sai";
         StyleButton(_reviewIncorrectWordsButton, ButtonKind.Secondary);
         _reviewIncorrectWordsButton.Click += ReviewIncorrectWordsButton_Click;
@@ -2076,7 +2072,6 @@ public sealed partial class Form1 : Form
         layout.Controls.Add(_answerFrame, 0, 3);
         layout.Controls.Add(practiceActions, 0, 4);
         layout.Controls.Add(_practiceTimerLabel, 0, 5);
-        layout.Controls.Add(_practiceScoreLabel, 0, 6);
         layout.Controls.Add(_practiceFeedback, 0, 8);
         layout.Controls.Add(_practiceHint, 0, 9);
         page.Padding = new Padding(20);
@@ -5513,8 +5508,6 @@ public sealed partial class Form1 : Form
     {
         SaveMissedWords();
         SaveTypedCorrectWords();
-        _practiceScoreLabel.Text = $"Đúng: {_correctAnswerCount}     Sai: {_wrongAnswerCount}";
-        _practiceScoreLabel.ForeColor = Color.FromArgb(48, 68, 88);
         _reviewIncorrectWordsButton.Text = $"Xem từ đã sai ({_incorrectWordCounts.Count})";
         _reviewIncorrectWordsButton.Enabled = _incorrectWordCounts.Count > 0;
     }
