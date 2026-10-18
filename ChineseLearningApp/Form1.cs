@@ -447,28 +447,16 @@ public sealed partial class Form1 : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 3,
             Padding = new Padding(20)
         };
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 76));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
+        // Import/add/delete live on the Settings page; this page is search + list.
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
-
-        var toolbar = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            WrapContents = true,
-            Padding = new Padding(0, 6, 0, 0)
-        };
-        toolbar.Controls.Add(CreateButton("Nhập CSV / TXT", ImportVocabulary));
-        toolbar.Controls.Add(CreateButton("Thêm từ", AddWord));
-        toolbar.Controls.Add(CreateButton("Xóa từ", DeleteWord, danger: true));
-        toolbar.Controls.Add(CreateButton("Xóa toàn bộ", DeleteAllWords, danger: true));
         _countLabel.AutoSize = true;
         _countLabel.ForeColor = MutedTextColor;
-        _countLabel.Margin = new Padding(14, 11, 0, 0);
-        toolbar.Controls.Add(_countLabel);
+        _countLabel.Margin = new Padding(8, 11, 0, 0);
 
         var searchRow = new FlowLayoutPanel
         {
@@ -499,6 +487,7 @@ public sealed partial class Form1 : Form
 
         searchRow.Controls.Add(selectAllButton);
         searchRow.Controls.Add(clearSelectionButton);
+        searchRow.Controls.Add(_countLabel);
 
         _grid.Dock = DockStyle.Fill;
         _grid.AllowUserToAddRows = false;
@@ -604,10 +593,9 @@ public sealed partial class Form1 : Form
             TextAlign = ContentAlignment.MiddleLeft
         };
 
-        layout.Controls.Add(toolbar, 0, 0);
-        layout.Controls.Add(searchRow, 0, 1);
-        layout.Controls.Add(CreateCard(_grid, Padding.Empty), 0, 2);
-        layout.Controls.Add(hint, 0, 3);
+        layout.Controls.Add(searchRow, 0, 0);
+        layout.Controls.Add(CreateCard(_grid, Padding.Empty), 0, 1);
+        layout.Controls.Add(hint, 0, 2);
         page.Controls.Add(layout);
         return page;
     }
@@ -621,13 +609,39 @@ public sealed partial class Form1 : Form
             ColumnCount = 2,
             Dock = DockStyle.Fill,
             Padding = new Padding(28),
-            RowCount = 2
+            RowCount = 3
         };
-        // Column checkboxes on the left, column order on the right.
+        // Word management on top; column checkboxes on the left, column order on the right.
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 420));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+        var manage = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Dock = DockStyle.Top,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true,
+            Margin = new Padding(0, 0, 0, 12)
+        };
+        manage.Controls.Add(new Label
+        {
+            AutoSize = true,
+            Font = new Font(UiFontName, 11F, FontStyle.Bold),
+            ForeColor = TextColor,
+            Text = "Quản lý từ vựng:",
+            Margin = new Padding(0, 14, 12, 0)
+        });
+        manage.Controls.Add(CreateButton("Nhập CSV / TXT", ImportVocabulary));
+        manage.Controls.Add(CreateButton("Thêm từ", AddWord));
+        manage.Controls.Add(CreateButton("Xóa từ đang chọn", DeleteWord, danger: true));
+        manage.Controls.Add(CreateButton("Xóa toàn bộ", DeleteAllWords, danger: true));
+        layout.Controls.Add(manage, 0, 0);
+        layout.SetColumnSpan(manage, 2);
+
         var intro = new Label
         {
             AutoSize = true,
@@ -637,7 +651,7 @@ public sealed partial class Form1 : Form
             Text = "Tích chọn cột muốn hiển thị trong danh sách từ vựng. Thay đổi được lưu tự động.",
             TextAlign = ContentAlignment.MiddleLeft
         };
-        layout.Controls.Add(intro, 0, 0);
+        layout.Controls.Add(intro, 0, 1);
         layout.SetColumnSpan(intro, 2);
 
         var columnOptions = new FlowLayoutPanel
@@ -691,7 +705,7 @@ public sealed partial class Form1 : Form
         practiceDurationSetting.Controls.Add(practiceDurationInput);
         columnOptions.Controls.Add(practiceDurationSetting);
 
-        layout.Controls.Add(columnOptions, 0, 1);
+        layout.Controls.Add(columnOptions, 0, 2);
 
         var orderPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 8, 0, 0) };
         var orderTitle = new Label
@@ -771,7 +785,7 @@ public sealed partial class Form1 : Form
         orderPanel.Controls.Add(orderTitle);
         orderPanel.Controls.Add(orderFrame);
         orderPanel.Controls.Add(orderButtons);
-        layout.Controls.Add(orderPanel, 1, 1);
+        layout.Controls.Add(orderPanel, 1, 2);
         page.Padding = new Padding(20);
         page.Controls.Add(CreateCard(layout, new Padding(8)));
         return page;
