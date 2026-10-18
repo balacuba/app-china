@@ -729,67 +729,113 @@ public sealed partial class Form1 : Form
         return page;
     }
 
+    // Settings: four rounded section cards in a centred 2x2 grid (word management,
+    // typing practice, visible columns, column order). Changes save automatically.
     private TabPage BuildColumnSettingsPage()
     {
         var page = CreatePage("Cài đặt");
-        var layout = new TableLayoutPanel
-        {
-            AutoScroll = true,
-            ColumnCount = 2,
-            Dock = DockStyle.Fill,
-            Padding = new Padding(28),
-            RowCount = 3
-        };
-        // Word management on top; column checkboxes on the left, column order on the right.
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 420));
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = PageColor };
 
-        var manage = new FlowLayoutPanel
+        var title = new Label
         {
             AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Dock = DockStyle.Top,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = true,
-            Margin = new Padding(0, 0, 0, 12)
-        };
-        manage.Controls.Add(new Label
-        {
-            AutoSize = true,
-            Font = new Font(UiFontName, 11F, FontStyle.Bold),
+            Font = new Font("Segoe UI Semibold", 20F),
             ForeColor = TextColor,
-            Text = "Quản lý từ vựng:",
-            Margin = new Padding(0, 14, 12, 0)
-        });
-        manage.Controls.Add(CreateButton("Nhập CSV / TXT", ImportVocabulary));
-        manage.Controls.Add(CreateButton("Thêm từ", AddWord));
-        manage.Controls.Add(CreateButton("Xóa toàn bộ", DeleteAllWords, danger: true));
-        layout.Controls.Add(manage, 0, 0);
-        layout.SetColumnSpan(manage, 2);
-
-        var intro = new Label
+            Text = "⚙  Cài đặt",
+            Margin = new Padding(10, 0, 0, 0)
+        };
+        var subtitle = new Label
         {
             AutoSize = true,
-            Dock = DockStyle.Fill,
-            Font = new Font("Segoe UI", 12F),
+            Font = new Font(UiFontName, 11F),
             ForeColor = MutedTextColor,
-            Text = "Tích chọn cột muốn hiển thị trong danh sách từ vựng. Thay đổi được lưu tự động.",
-            TextAlign = ContentAlignment.MiddleLeft
+            Text = "Mọi thay đổi được lưu tự động.",
+            Margin = new Padding(14, 0, 0, 0)
         };
-        layout.Controls.Add(intro, 0, 1);
-        layout.SetColumnSpan(intro, 2);
+        var heading = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            BackColor = PageColor
+        };
+        heading.Controls.Add(title);
+        heading.Controls.Add(subtitle);
 
-        var columnOptions = new FlowLayoutPanel
+        // Word management: import, add and delete all.
+        var manageButtons = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            WrapContents = true,
+            BackColor = SurfaceColor,
+            Padding = new Padding(0, 6, 0, 0)
+        };
+        manageButtons.Controls.Add(CreateButton("📥  Nhập CSV / TXT", ImportVocabulary));
+        manageButtons.Controls.Add(CreateButton("➕  Thêm từ", AddWord));
+        manageButtons.Controls.Add(CreateButton("🗑  Xóa toàn bộ", DeleteAllWords, danger: true));
+        var manageCard = CreateSettingsSection("📦", Color.FromArgb(219, 234, 254), "Quản lý từ vựng",
+            "Nhập danh sách từ từ tệp, thêm từ mới hoặc xóa toàn bộ.", manageButtons);
+
+        // Typing practice: seconds per question with a − / + stepper. The hidden
+        // NumericUpDown keeps the value, its limits and the save handler.
+        var practiceDurationInput = new NumericUpDown
+        {
+            Minimum = 1,
+            Maximum = 300,
+            Value = _practiceDurationSeconds,
+            Visible = false
+        };
+        practiceDurationInput.ValueChanged += PracticeDurationInput_ValueChanged;
+        var durationValue = new PillLabel
+        {
+            AutoSize = false,
+            Size = new Size(130, 40),
+            Font = new Font(UiFontName, 13F, FontStyle.Bold),
+            ForeColor = Accent,
+            TextAlign = ContentAlignment.MiddleCenter,
+            Margin = new Padding(0, 0, 10, 0)
+        };
+        void ShowDuration() => durationValue.Text = $"{practiceDurationInput.Value} giây";
+        practiceDurationInput.ValueChanged += (_, _) => ShowDuration();
+        ShowDuration();
+        Button StepButton(string text, int step)
+        {
+            var button = CreateButton(text, (_, _) => practiceDurationInput.Value =
+                Math.Clamp(practiceDurationInput.Value + step, practiceDurationInput.Minimum, practiceDurationInput.Maximum),
+                secondary: true);
+            button.AutoSize = false;
+            button.Size = new Size(44, 40);
+            button.Padding = Padding.Empty;
+            button.Font = new Font(UiFontName, 14F, FontStyle.Bold);
+            return button;
+        }
+
+        var stepper = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            WrapContents = false,
+            BackColor = SurfaceColor,
+            Padding = new Padding(0, 6, 0, 0)
+        };
+        stepper.Controls.Add(StepButton("−", -1));
+        stepper.Controls.Add(durationValue);
+        stepper.Controls.Add(StepButton("+", 1));
+        stepper.Controls.Add(practiceDurationInput);
+        stepper.Controls.Add(new Label
         {
             AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Dock = DockStyle.Top,
-            FlowDirection = FlowDirection.TopDown,
-            WrapContents = false
-        };
+            ForeColor = MutedTextColor,
+            Text = "Từ 1 đến 300 giây",
+            Margin = new Padding(8, 11, 0, 0)
+        });
+        var practiceCard = CreateSettingsSection("⏱", Color.FromArgb(220, 252, 231), "Luyện gõ",
+            "Thời gian cho mỗi câu khi luyện gõ.", stepper);
+
+        // Visible columns: rounded checkboxes in two columns.
+        var columnChecks = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, BackColor = SurfaceColor };
+        columnChecks.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        columnChecks.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        var checkIndex = 0;
         foreach (DataGridViewColumn column in _grid.Columns)
         {
             var checkBox = new RoundedCheckBox
@@ -800,49 +846,17 @@ public sealed partial class Form1 : Form
                 ForeColor = BodyTextColor,
                 Text = Convert.ToString(column.Tag, CultureInfo.CurrentCulture) ?? column.HeaderText,
                 Tag = column.Name,
-                Margin = new Padding(0, 8, 0, 8)
+                Margin = new Padding(0, 6, 0, 6)
             };
             checkBox.CheckedChanged += ColumnSettingsCheckBox_CheckedChanged;
-            columnOptions.Controls.Add(checkBox);
+            columnChecks.Controls.Add(checkBox, checkIndex % 2, checkIndex / 2);
+            checkIndex++;
         }
 
-        var practiceDurationSetting = new FlowLayoutPanel
-        {
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            FlowDirection = FlowDirection.LeftToRight,
-            Margin = new Padding(0, 16, 0, 8),
-            WrapContents = false
-        };
-        practiceDurationSetting.Controls.Add(new Label
-        {
-            AutoSize = true,
-            Font = new Font("Segoe UI", 11F),
-            Margin = new Padding(0, 5, 8, 0),
-            Text = "Thời gian mỗi câu luyện gõ (giây):"
-        });
-        var practiceDurationInput = new NumericUpDown
-        {
-            Minimum = 1,
-            Maximum = 300,
-            Value = _practiceDurationSeconds,
-            Width = 80,
-            Font = new Font("Segoe UI", 11F)
-        };
-        practiceDurationInput.ValueChanged += PracticeDurationInput_ValueChanged;
-        practiceDurationSetting.Controls.Add(practiceDurationInput);
-        columnOptions.Controls.Add(practiceDurationSetting);
+        var columnsCard = CreateSettingsSection("👁", Color.FromArgb(252, 231, 243), "Cột hiển thị",
+            "Tích chọn cột muốn hiện trong danh sách từ.", columnChecks);
 
-        layout.Controls.Add(columnOptions, 0, 2);
-
-        var orderPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 8, 0, 0) };
-        var orderTitle = new Label
-        {
-            AutoSize = true,
-            Dock = DockStyle.Top,
-            Font = new Font("Segoe UI", 11F, FontStyle.Bold),
-            Text = "Thứ tự cột (chọn cột rồi di chuyển):"
-        };
+        // Column order: a numbered list with ▲ / ▼ buttons beside it.
         var orderList = new ListBox
         {
             BorderStyle = BorderStyle.None,
@@ -886,13 +900,6 @@ public sealed partial class Form1 : Form
                 new Rectangle(e.Bounds.Left + 12, e.Bounds.Top, e.Bounds.Width - 16, e.Bounds.Height),
                 selected ? Accent : BodyTextColor, TextFormatFlags.VerticalCenter | TextFormatFlags.Left);
         };
-        var orderFrame = new RoundedPanel
-        {
-            Location = new Point(0, 34),
-            Size = new Size(320, 380),
-            Padding = new Padding(6)
-        };
-        orderFrame.Controls.Add(orderList);
         // Show the plain column title (Tag), without the filter marks in the header.
         orderList.Format += (_, e) =>
         {
@@ -902,21 +909,100 @@ public sealed partial class Form1 : Form
             }
         };
         RefreshColumnOrderList(orderList);
+        var orderFrame = new RoundedPanel
+        {
+            Dock = DockStyle.Fill,
+            Padding = new Padding(6),
+            Margin = new Padding(0, 4, 12, 0)
+        };
+        orderFrame.Controls.Add(orderList);
         var orderButtons = new FlowLayoutPanel
         {
             AutoSize = true,
-            Location = new Point(332, 34),
-            WrapContents = false
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            BackColor = SurfaceColor,
+            Margin = new Padding(0, 4, 0, 0)
         };
-        orderButtons.Controls.Add(CreateButton("Lên", (_, _) => MoveSelectedColumn(orderList, -1), secondary: true));
-        orderButtons.Controls.Add(CreateButton("Xuống", (_, _) => MoveSelectedColumn(orderList, 1), secondary: true));
-        orderPanel.Controls.Add(orderTitle);
-        orderPanel.Controls.Add(orderFrame);
-        orderPanel.Controls.Add(orderButtons);
-        layout.Controls.Add(orderPanel, 1, 2);
-        page.Padding = new Padding(20);
-        page.Controls.Add(CreateCard(layout, new Padding(8)));
+        foreach (var (text, direction) in new[] { ("▲  Lên", -1), ("▼  Xuống", 1) })
+        {
+            var button = CreateButton(text, (_, _) => MoveSelectedColumn(orderList, direction), secondary: true);
+            button.AutoSize = false;
+            button.Size = new Size(120, 40);
+            button.Margin = new Padding(0, 0, 0, 10);
+            orderButtons.Controls.Add(button);
+        }
+
+        var orderBody = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, BackColor = SurfaceColor };
+        orderBody.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        orderBody.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        orderBody.Controls.Add(orderFrame, 0, 0);
+        orderBody.Controls.Add(orderButtons, 1, 0);
+        var orderCard = CreateSettingsSection("↕", Color.FromArgb(254, 243, 199), "Thứ tự cột",
+            "Chọn một cột rồi bấm Lên / Xuống để đổi vị trí.", orderBody);
+
+        const int headingHeight = 72;
+        const int topRowHeight = 168;
+        const int bottomRowHeight = 470;
+        var grid = new TableLayoutPanel { ColumnCount = 2, RowCount = 3, BackColor = PageColor };
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, headingHeight));
+        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, topRowHeight));
+        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, bottomRowHeight));
+        grid.Controls.Add(heading, 0, 0);
+        grid.SetColumnSpan(heading, 2);
+        grid.Controls.Add(manageCard, 0, 1);
+        grid.Controls.Add(practiceCard, 1, 1);
+        grid.Controls.Add(columnsCard, 0, 2);
+        grid.Controls.Add(orderCard, 1, 2);
+        grid.Height = headingHeight + topRowHeight + bottomRowHeight;
+        scroller.Controls.Add(grid);
+
+        // Centred, at most 1180px wide; the panel scrolls when the window is short.
+        void LayoutSettings()
+        {
+            var width = Math.Min(1180, Math.Max(700, scroller.ClientSize.Width - 40));
+            grid.Width = width;
+            grid.Location = new Point(
+                Math.Max(0, (scroller.ClientSize.Width - width) / 2) + scroller.AutoScrollPosition.X,
+                Math.Max(16, (scroller.ClientSize.Height - grid.Height) / 2) + scroller.AutoScrollPosition.Y);
+        }
+
+        scroller.Resize += (_, _) => LayoutSettings();
+        LayoutSettings();
+        page.Controls.Add(scroller);
         return page;
+    }
+
+    // A rounded white card with a pastel emoji badge, a title, a short
+    // description and the section's controls below.
+    private static RoundedPanel CreateSettingsSection(string icon, Color badgeColor, string title, string description, Control body)
+    {
+        var card = new RoundedPanel
+        {
+            Dock = DockStyle.Fill,
+            Radius = 18,
+            FillColor = SurfaceColor,
+            OutlineColor = BorderColor,
+            Margin = new Padding(10),
+            Padding = new Padding(22, 18, 22, 16)
+        };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = SurfaceColor };
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 62));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.Controls.Add(new SectionHeader
+        {
+            Dock = DockStyle.Fill,
+            Icon = icon,
+            BadgeColor = badgeColor,
+            Title = title,
+            Description = description
+        }, 0, 0);
+        body.Margin = Padding.Empty;
+        layout.Controls.Add(body, 0, 1);
+        card.Controls.Add(layout);
+        return card;
     }
 
     private void RefreshColumnOrderList(ListBox list)
@@ -3029,6 +3115,51 @@ public sealed partial class Form1 : Form
         }
 
         return (lines, lineHeight);
+    }
+
+    // Header of a Settings card: a round pastel badge with an emoji, then the
+    // title and a muted one-line description.
+    private sealed class SectionHeader : Control
+    {
+        public string Icon { get; set; } = "";
+        public string Title { get; set; } = "";
+        public string Description { get; set; } = "";
+        public Color BadgeColor { get; set; } = AccentSoft;
+
+        public SectionHeader()
+        {
+            SetStyle(
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw |
+                ControlStyles.UserPaint,
+                true);
+            BackColor = SurfaceColor;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var graphics = e.Graphics;
+            graphics.Clear(BackColor);
+            graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            const int badge = 44;
+            var badgeBounds = new Rectangle(0, 2, badge, badge);
+            using (var fill = new SolidBrush(BadgeColor))
+            {
+                graphics.FillEllipse(fill, badgeBounds);
+            }
+
+            using var iconFont = new Font("Segoe UI Emoji", 16F);
+            TextRenderer.DrawText(graphics, Icon, iconFont, badgeBounds, TextColor,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            using var titleFont = new Font("Segoe UI Semibold", 13F);
+            using var descriptionFont = new Font(UiFontName, 10F);
+            var textLeft = badge + 14;
+            TextRenderer.DrawText(graphics, Title, titleFont, new Rectangle(textLeft, 0, Width - textLeft, 26),
+                TextColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            TextRenderer.DrawText(graphics, Description, descriptionFont, new Rectangle(textLeft, 26, Width - textLeft, 22),
+                MutedTextColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        }
     }
 
     // A large rounded card on the Home page: emoji badge, title and a short
