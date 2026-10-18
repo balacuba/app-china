@@ -828,13 +828,12 @@ public sealed partial class Form1 : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 3,
             Padding = new Padding(20)
         };
-        // Import/add/delete live on the Settings page; this page is search,
-        // HSK filter and the list.
+        // Import/add/delete live on the Settings page; this page is the HSK
+        // filter and search pills, then the list.
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
 
@@ -895,6 +894,8 @@ public sealed partial class Form1 : Form
             Visible = false
         };
         searchFrame.Controls.AddRange([searchIcon, _searchBox, clearSearch]);
+        // The HSK filter pill sits first, so the search box can open to its right.
+        searchRow.Controls.Add(BuildHskFilterButton());
         searchRow.Controls.Add(searchButton);
         searchRow.Controls.Add(searchFrame);
 
@@ -1107,9 +1108,8 @@ public sealed partial class Form1 : Form
         };
 
         layout.Controls.Add(searchRow, 0, 0);
-        layout.Controls.Add(BuildHskFilterRow(), 0, 1);
-        layout.Controls.Add(CreateCard(_grid, Padding.Empty), 0, 2);
-        layout.Controls.Add(hint, 0, 3);
+        layout.Controls.Add(CreateCard(_grid, Padding.Empty), 0, 1);
+        layout.Controls.Add(hint, 0, 2);
         page.Controls.Add(layout);
         return page;
     }
@@ -3161,34 +3161,120 @@ public sealed partial class Form1 : Form
     private static readonly string[] HskFilterLevels = ["HSK 1", "HSK 2", "HSK 3", "HSK 4", "HSK 5", "HSK 6", "HSK 7-9"];
     private readonly List<(RoundedCheckBox Box, string? Level, string Caption)> _hskFilterChecks = [];
     private bool _syncingHskFilterChecks;
+    private Button? _hskFilterButton;
 
-    private FlowLayoutPanel BuildHskFilterRow()
+    // HSK filter as a rounded "Lọc HSK" pill: moving the mouse onto it drops
+    // down a rounded card with one tick box per level, which folds away once
+    // the mouse has left both the pill and the card.
+    private Button BuildHskFilterButton()
     {
-        var row = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Padding = Padding.Empty };
-        row.Controls.Add(new Label
+        var button = CreateButton("🎯  Lọc HSK  ▾", (_, _) => { }, secondary: true);
+        button.AutoSize = false;
+        button.Size = new Size(190, 40);
+        button.Margin = new Padding(0, 4, 12, 0);
+        _hskFilterButton = button;
+
+        const int cardWidth = 250;
+        const int itemHeight = 36;
+        var levels = HskFilterLevels.Select(level => ((string?)level, level)).Append((null, "Khác")).ToList();
+        var cardHeight = 50 + levels.Count * itemHeight + 60;
+        var card = new RoundedPanel
         {
-            AutoSize = true,
-            Text = "🎯 Lọc HSK:",
-            ForeColor = BodyTextColor,
-            Margin = new Padding(0, 11, 12, 0)
+            Size = new Size(cardWidth, cardHeight),
+            Radius = 16,
+            FillColor = SurfaceColor,
+            OutlineColor = Color.FromArgb(203, 213, 225),
+            BackColor = SurfaceColor
+        };
+        card.Controls.Add(new Label
+        {
+            AutoSize = false,
+            Location = new Point(18, 14),
+            Size = new Size(cardWidth - 36, 24),
+            Text = "Lọc theo cấp HSK",
+            Font = new Font("Segoe UI Semibold", 11F),
+            ForeColor = TextColor,
+            BackColor = SurfaceColor
         });
-        foreach (var (level, caption) in HskFilterLevels.Select(level => ((string?)level, level)).Append((null, "Khác")))
+        for (var index = 0; index < levels.Count; index++)
         {
+            var (level, caption) = levels[index];
             var box = new RoundedCheckBox
             {
-                AutoSize = true,
+                AutoSize = false,
+                Location = new Point(18, 48 + index * itemHeight),
+                Size = new Size(cardWidth - 36, itemHeight - 4),
                 Text = caption,
                 Font = new Font(UiFontName, 10.5F),
                 ForeColor = BodyTextColor,
-                BackColor = PageColor,
-                Margin = new Padding(0, 8, 18, 0)
+                BackColor = SurfaceColor
             };
             box.CheckedChanged += (_, _) => ApplyHskFilterChecks();
             _hskFilterChecks.Add((box, level, caption));
-            row.Controls.Add(box);
+            card.Controls.Add(box);
         }
 
-        return row;
+        var clear = CreateButton("↺  Bỏ lọc", (_, _) =>
+        {
+            _syncingHskFilterChecks = true;
+            _hskFilterChecks.ForEach(item => item.Box.Checked = false);
+            _syncingHskFilterChecks = false;
+            ApplyHskFilterChecks();
+        }, secondary: true);
+        clear.AutoSize = false;
+        clear.Size = new Size(cardWidth - 36, 38);
+        clear.Margin = Padding.Empty;
+        clear.Location = new Point(18, cardHeight - 52);
+        card.Controls.Add(clear);
+
+        var dropDown = new ToolStripDropDown { AutoClose = false, Padding = Padding.Empty, DropShadowEnabled = true };
+        dropDown.Items.Add(new ToolStripControlHost(card)
+        {
+            AutoSize = false,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
+            Size = card.Size
+        });
+        dropDown.Opened += (_, _) =>
+        {
+            using var path = RoundedMenuRenderer.CreateRoundedPath(new RectangleF(0, 0, dropDown.Width, dropDown.Height), 16);
+            dropDown.Region = new Region(path);
+        };
+
+        // While open, fold the card away once the pointer is off both pieces.
+        var watch = new System.Windows.Forms.Timer { Interval = 150 };
+        watch.Tick += (_, _) =>
+        {
+            var cursor = Cursor.Position;
+            var overButton = button.IsHandleCreated &&
+                Rectangle.Inflate(button.RectangleToScreen(button.ClientRectangle), 8, 8).Contains(cursor);
+            var overCard = dropDown.Visible && Rectangle.Inflate(dropDown.Bounds, 8, 8).Contains(cursor);
+            if (!overButton && !overCard)
+            {
+                watch.Stop();
+                dropDown.Close();
+            }
+        };
+        void Open()
+        {
+            if (dropDown.Visible || !button.IsHandleCreated)
+            {
+                return;
+            }
+
+            dropDown.Show(button.PointToScreen(new Point(0, button.Height + 4)));
+            watch.Start();
+        }
+
+        button.MouseEnter += (_, _) => Open();
+        button.MouseMove += (_, _) => Open();
+        button.Click += (_, _) => Open();
+        button.Disposed += (_, _) =>
+        {
+            watch.Dispose();
+            dropDown.Dispose();
+        };
+        return button;
     }
 
     private void ApplyHskFilterChecks()
@@ -3262,6 +3348,18 @@ public sealed partial class Form1 : Form
         finally
         {
             _syncingHskFilterChecks = false;
+        }
+
+        // The pill shows what is picked: one level by name, several as a count.
+        var picked = _hskFilterChecks.Where(item => item.Box.Checked).Select(item => item.Caption).ToList();
+        if (_hskFilterButton is not null)
+        {
+            _hskFilterButton.Text = picked.Count switch
+            {
+                0 => "🎯  Lọc HSK  ▾",
+                1 => $"🎯  {picked[0]}  ▾",
+                _ => $"🎯  {picked.Count} cấp HSK  ▾"
+            };
         }
     }
 
