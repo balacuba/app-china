@@ -1115,7 +1115,7 @@ public sealed partial class Form1 : Form
         _flashcardBackLayout.Visible = false;
         _flashcardBackLayout.Resize += (_, _) => CenterFlashcardMeaningContent();
         _flashcardPinyin.AutoSize = false;
-        _flashcardPinyin.Font = new Font("Segoe UI", 26F, FontStyle.Bold);
+        _flashcardPinyin.Font = new Font("Segoe UI", 36F, FontStyle.Bold);
         _flashcardPinyin.ForeColor = Accent;
         _flashcardPinyin.TextAlign = ContentAlignment.MiddleCenter;
         _flashcardPinyin.Margin = Padding.Empty;
@@ -3830,6 +3830,36 @@ public sealed partial class Form1 : Form
             (_flashcardHost.ClientSize.Height - size.Height) / 2);
     }
 
+    // Picks the largest pinyin font (56pt down to 24pt) whose roomy pill fits the
+    // given space, applies it, and returns the pill size.
+    private Size FitFlashcardPinyin(int maxWidth, int maxHeight)
+    {
+        var text = string.IsNullOrEmpty(_flashcardPinyin.Text) ? " " : _flashcardPinyin.Text;
+        Size PillFor(Size textSize) => new(textSize.Width + textSize.Height * 2, (int)(textSize.Height * 1.6F));
+        float fontSize = 56;
+        Size pill;
+        while (true)
+        {
+            using var probe = new Font("Segoe UI", fontSize, FontStyle.Bold);
+            pill = PillFor(TextRenderer.MeasureText(text, probe));
+            if (fontSize <= 24 || (pill.Width <= maxWidth && pill.Height <= maxHeight))
+            {
+                break;
+            }
+
+            fontSize -= 2;
+        }
+
+        if (Math.Abs(_flashcardPinyin.Font.Size - fontSize) > 0.1F)
+        {
+            var old = _flashcardPinyin.Font;
+            _flashcardPinyin.Font = new Font("Segoe UI", fontSize, FontStyle.Bold);
+            old.Dispose();
+        }
+
+        return new Size(Math.Min(pill.Width, maxWidth), pill.Height);
+    }
+
     private void CenterFlashcardMeaningContent()
     {
         if (_flashcardBackLayout.ClientSize.Width <= 0 || _flashcardBackLayout.ClientSize.Height <= 0)
@@ -3838,29 +3868,25 @@ public sealed partial class Form1 : Form
         }
 
         var maximumTextWidth = Math.Max(100, _flashcardBackLayout.ClientSize.Width - 32);
-        var maximumTextSize = new Size(maximumTextWidth, 0);
-        _flashcardPinyin.MaximumSize = maximumTextSize;
-        // Pinyin sits in a centred pill sized to its text.
-        var pinyinText = TextRenderer.MeasureText(
-            string.IsNullOrEmpty(_flashcardPinyin.Text) ? " " : _flashcardPinyin.Text,
-            _flashcardPinyin.Font);
-        var pinyinSize = new Size(Math.Min(maximumTextWidth, pinyinText.Width + 64), pinyinText.Height + 14);
+        _flashcardPinyin.MaximumSize = new Size(maximumTextWidth, 0);
         var width = _flashcardBackLayout.ClientSize.Width;
         var height = _flashcardBackLayout.ClientSize.Height;
         const int sidePadding = 24;
         const int gap = 28;
-        const int meaningGap = 28;
+        const int bottomMargin = 12;
         var sideWidth = Math.Min(360, (int)((width - 2 * sidePadding) * 0.28));
         var middleWidth = width - 2 * (sidePadding + sideWidth + gap);
-        if (sideWidth >= 220 && middleWidth >= Math.Max(300, pinyinSize.Width))
+        var wide = sideWidth >= 220 && middleWidth >= 300;
+        var pinyinSize = FitFlashcardPinyin(wide ? middleWidth : maximumTextWidth, wide ? height / 2 : height / 3);
+        if (wide)
         {
-            // Wide card: grammar | pinyin with the meanings below | examples.
+            // Wide card: grammar | big pinyin pill | examples, meanings along the bottom.
             var leftHeight = _flashcardDetailsLeft.GetContentHeight(sideWidth);
             var rightHeight = _flashcardDetailsRight.GetContentHeight(sideWidth);
             var bottomHeight = _flashcardDetailsBottom.GetContentHeight(middleWidth);
-            // The pinyin stays centred unless the meanings would run off the card.
-            var middleTotal = pinyinSize.Height + (bottomHeight > 0 ? meaningGap + bottomHeight : 0);
-            var pinyinTop = Math.Max(0, Math.Min((height - pinyinSize.Height) / 2, height - middleTotal));
+            var bottomTop = Math.Max(pinyinSize.Height + 16, height - bottomMargin - bottomHeight);
+            // The pinyin is centred in the space above the meanings, a little high.
+            var pinyinTop = Math.Max(0, Math.Min((bottomTop - pinyinSize.Height) / 2 - 8, bottomTop - pinyinSize.Height - 16));
             _flashcardPinyin.Bounds = new Rectangle(
                 (width - pinyinSize.Width) / 2,
                 pinyinTop,
@@ -3868,9 +3894,9 @@ public sealed partial class Form1 : Form
                 pinyinSize.Height);
             _flashcardDetailsBottom.Bounds = new Rectangle(
                 (width - middleWidth) / 2,
-                pinyinTop + pinyinSize.Height + meaningGap,
+                bottomTop,
                 middleWidth,
-                Math.Max(0, Math.Min(bottomHeight, height - pinyinTop - pinyinSize.Height - meaningGap)));
+                Math.Max(0, Math.Min(bottomHeight, height - bottomTop)));
             _flashcardDetailsLeft.Bounds = new Rectangle(
                 sidePadding,
                 Math.Max(0, (height - leftHeight) / 2),
