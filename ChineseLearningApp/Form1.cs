@@ -265,6 +265,7 @@ public sealed partial class Form1 : Form
         _grid.EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2;
         _grid.CellClick += VocabularyGrid_CellClick;
         _grid.CellDoubleClick += VocabularyGrid_CellDoubleClick;
+        _grid.CellPainting += VocabularyGrid_CellPainting;
         _grid.ColumnHeaderMouseClick += VocabularyGrid_ColumnHeaderMouseClick;
         _grid.CellBeginEdit += VocabularyGrid_CellBeginEdit;
         _grid.CellEndEdit += VocabularyGrid_CellEndEdit;
@@ -2141,6 +2142,111 @@ public sealed partial class Form1 : Form
             nameof(VocabularyWord.VietnameseExample) or
             nameof(VocabularyWord.EnglishGrammar) or
             nameof(VocabularyWord.VietnameseGrammar);
+
+    private static readonly Color HighlightWordColor = Color.FromArgb(200, 30, 30);
+
+    // Example and grammar cells draw the row's vocabulary word in red.
+    private void VocabularyGrid_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
+    {
+        if (e.RowIndex < 0 ||
+            e.ColumnIndex < 0 ||
+            e.CellStyle is null ||
+            _grid.Columns[e.ColumnIndex].DataPropertyName is not
+                (nameof(VocabularyWord.ChineseExample) or
+                 nameof(VocabularyWord.EnglishGrammar) or
+                 nameof(VocabularyWord.VietnameseGrammar)) ||
+            _grid.Rows[e.RowIndex].DataBoundItem is not VocabularyWord word ||
+            Convert.ToString(e.FormattedValue, CultureInfo.CurrentCulture) is not { Length: > 0 } text)
+        {
+            return;
+        }
+
+        var segments = SplitHighlightedWord(text, GetHighlightKeys(word.Chinese));
+        if (!segments.Any(segment => segment.Highlight))
+        {
+            return;
+        }
+
+        e.Paint(e.CellBounds, DataGridViewPaintParts.All & ~DataGridViewPaintParts.ContentForeground);
+        var selected = (e.State & DataGridViewElementStates.Selected) != 0;
+        var normalColor = selected ? e.CellStyle.SelectionForeColor : e.CellStyle.ForeColor;
+        const TextFormatFlags flags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix |
+                                      TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter;
+        var font = e.CellStyle.Font ?? _grid.Font;
+        var bounds = new Rectangle(
+            e.CellBounds.Left + e.CellStyle.Padding.Left,
+            e.CellBounds.Top,
+            Math.Max(0, e.CellBounds.Width - e.CellStyle.Padding.Horizontal),
+            e.CellBounds.Height - 1);
+        var widths = segments
+            .Select(segment => TextRenderer.MeasureText(e.Graphics!, segment.Text, font, Size.Empty, flags).Width)
+            .ToList();
+        var x = bounds.Left + Math.Max(0, (bounds.Width - widths.Sum()) / 2);
+        var clip = e.Graphics!.Clip;
+        e.Graphics.SetClip(bounds);
+        for (var i = 0; i < segments.Count && x < bounds.Right; i++)
+        {
+            TextRenderer.DrawText(
+                e.Graphics,
+                segments[i].Text,
+                font,
+                new Rectangle(x, bounds.Top, widths[i] + 1, bounds.Height),
+                segments[i].Highlight ? HighlightWordColor : normalColor,
+                flags);
+            x += widths[i];
+        }
+
+        e.Graphics.Clip = clip;
+        e.Handled = true;
+    }
+
+    // Keys are the Chinese runs of the word, with and without bracketed parts
+    // (有(一)点儿 → 有一点儿, 有点儿; 太...了 → 太, 了), longest first.
+    private static List<string> GetHighlightKeys(string chinese)
+    {
+        var withContent = chinese.Replace("(", "").Replace(")", "").Replace("（", "").Replace("）", "");
+        var withoutContent = System.Text.RegularExpressions.Regex.Replace(chinese, @"[\(（][^\)）]*[\)）]", "");
+        return new[] { withContent, withoutContent }
+            .SelectMany(value => System.Text.RegularExpressions.Regex.Matches(value, @"\p{IsCJKUnifiedIdeographs}+"))
+            .Select(match => match.Value)
+            .Distinct(StringComparer.Ordinal)
+            .OrderByDescending(key => key.Length)
+            .ToList();
+    }
+
+    private static List<(string Text, bool Highlight)> SplitHighlightedWord(string text, IReadOnlyList<string> keys)
+    {
+        var segments = new List<(string Text, bool Highlight)>();
+        var plain = new StringBuilder();
+        var index = 0;
+        while (index < text.Length)
+        {
+            var key = keys.FirstOrDefault(candidate =>
+                string.CompareOrdinal(text, index, candidate, 0, candidate.Length) == 0);
+            if (key is null)
+            {
+                plain.Append(text[index]);
+                index++;
+                continue;
+            }
+
+            if (plain.Length > 0)
+            {
+                segments.Add((plain.ToString(), false));
+                plain.Clear();
+            }
+
+            segments.Add((key, true));
+            index += key.Length;
+        }
+
+        if (plain.Length > 0)
+        {
+            segments.Add((plain.ToString(), false));
+        }
+
+        return segments;
+    }
 
     private void VocabularyGrid_CellDoubleClick(object? sender, DataGridViewCellEventArgs e)
     {
