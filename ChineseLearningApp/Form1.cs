@@ -363,7 +363,7 @@ public sealed partial class Form1 : Form
     private void BuildInterface()
     {
         var practicePage = BuildPracticePage();
-        // Pages are switched from the ☰ menu button in the header.
+        // Pages open from the Home cards; the header button returns to Home.
         var tabs = new PageHost { Dock = DockStyle.Fill, Font = new Font(UiFontName, 10.5F) };
         var vocabularyPage = BuildVocabularyPage();
         var flashcardPage = BuildFlashcardPage();
@@ -388,7 +388,7 @@ public sealed partial class Form1 : Form
         tabs.BringToFront();
     }
 
-    // Accent-coloured app bar: app name, the ☰ page menu and a greeting.
+    // Accent-coloured app bar: the Home button, app name and a greeting.
     private Panel BuildHeaderBar(TabControl tabs)
     {
         var header = new Panel { Dock = DockStyle.Top, Height = 60, BackColor = Accent, Padding = new Padding(20, 0, 20, 0) };
@@ -408,29 +408,27 @@ public sealed partial class Form1 : Form
             Margin = new Padding(24, 0, 24, 0)
         };
 
-        // White rounded button showing the current page; it opens the page menu.
-        var menuButton = new RoundedButton();
-        StyleButton(menuButton, ButtonKind.Secondary);
-        menuButton.BackColor = Color.White;
-        menuButton.FlatAppearance.MouseOverBackColor = AccentSoft;
-        menuButton.FlatAppearance.MouseDownBackColor = AccentSoftHover;
-        menuButton.FlatAppearance.BorderColor = Color.White;
-        menuButton.AutoSize = false;
-        menuButton.Size = new Size(230, 40);
-        menuButton.Anchor = AnchorStyles.Left;
-        menuButton.Margin = Padding.Empty;
-        // The menu only leads back to Home (page 0); Home's cards open the other pages.
-        var checkPage = AttachRoundedMenu(menuButton, [$"🏠  {tabs.TabPages[0].Text}"], _ => tabs.SelectedIndex = 0);
-        void SyncMenuButton()
+        // White rounded button that returns to Home from any page.
+        var homeButton = new RoundedButton();
+        StyleButton(homeButton, ButtonKind.Secondary);
+        homeButton.BackColor = Color.White;
+        homeButton.FlatAppearance.MouseOverBackColor = AccentSoft;
+        homeButton.FlatAppearance.MouseDownBackColor = AccentSoftHover;
+        homeButton.FlatAppearance.BorderColor = Color.White;
+        homeButton.AutoSize = false;
+        homeButton.Size = new Size(230, 40);
+        homeButton.Anchor = AnchorStyles.Left;
+        homeButton.Margin = Padding.Empty;
+        // The button goes straight back to Home (page 0); Home's cards open the other pages.
+        homeButton.Click += (_, _) => tabs.SelectedIndex = 0;
+        void SyncHomeButton()
         {
-            // SelectedTab is still null before the control has a handle.
-            var index = Math.Max(0, tabs.SelectedIndex);
-            menuButton.Text = $"☰   {tabs.TabPages[index].Text}   ▾";
-            checkPage(index == 0 ? 0 : -1);
+            // SelectedIndex is still -1 before the control has a handle.
+            homeButton.Text = tabs.SelectedIndex <= 0 ? "🏠   Trang chủ" : "←   Về trang chủ";
         }
 
-        tabs.SelectedIndexChanged += (_, _) => SyncMenuButton();
-        SyncMenuButton();
+        tabs.SelectedIndexChanged += (_, _) => SyncHomeButton();
+        SyncHomeButton();
 
         var greeting = new Label
         {
@@ -441,7 +439,7 @@ public sealed partial class Form1 : Form
             ForeColor = Color.FromArgb(219, 234, 254),
             Margin = Padding.Empty
         };
-        row.Controls.Add(menuButton, 0, 0);
+        row.Controls.Add(homeButton, 0, 0);
         row.Controls.Add(appName, 1, 0);
         row.Controls.Add(greeting, 2, 0);
         header.Controls.Add(row);
@@ -3075,7 +3073,7 @@ public sealed partial class Form1 : Form
     }
 
     // A TabControl without its tab strip or border: the pages fill the whole
-    // control at any size. Pages are switched from the ☰ header menu.
+    // control at any size. Pages open from the Home cards.
     private sealed class PageHost : TabControl
     {
         private const int TCM_ADJUSTRECT = 0x1328;
