@@ -1921,7 +1921,7 @@ public sealed partial class Form1 : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 11));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 20));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 104)); // countdown clock
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 150)); // countdown clock, dropped below the buttons
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 0)); // the score now lives on Home
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 0));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 15));
@@ -2018,6 +2018,8 @@ public sealed partial class Form1 : Form
         SelectPracticeMode(0);
         practiceActions.Controls.AddRange([continueStudyButton, _pausePracticeButton, _skipPracticeButton]);
         _practiceClock.Dock = DockStyle.Fill;
+        // Space above the face so it sits midway between the buttons and the hint.
+        _practiceClock.Padding = new Padding(0, 46, 0, 0);
         _reviewIncorrectWordsButton.Text = "Xem từ đã sai";
         StyleButton(_reviewIncorrectWordsButton, ButtonKind.Secondary);
         _reviewIncorrectWordsButton.Click += ReviewIncorrectWordsButton_Click;
@@ -4218,8 +4220,10 @@ public sealed partial class Form1 : Form
             }
 
             graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-            var size = Math.Min(Width, Height) - 6;
-            var face = new RectangleF((Width - size) / 2F, (Height - size) / 2F, size, size);
+            // The face sits in the area left after Padding (used to drop it lower).
+            var area = new Rectangle(Padding.Left, Padding.Top, Width - Padding.Horizontal, Height - Padding.Vertical);
+            var size = Math.Min(area.Width, area.Height) - 6;
+            var face = new RectangleF(area.X + (area.Width - size) / 2F, area.Y + (area.Height - size) / 2F, size, size);
             const float ring = 7F;
             var arcBounds = RectangleF.Inflate(face, -ring / 2, -ring / 2);
 
