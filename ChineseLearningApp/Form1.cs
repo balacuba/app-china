@@ -210,8 +210,10 @@ public sealed partial class Form1 : Form
         FitColumnsToGrid();
     }
 
-    // On a wide screen the text columns stretch in proportion to fill the grid;
-    // on a narrow one they keep their base width and the grid scrolls sideways.
+    // Text columns are scaled from their base widths so together they exactly fill
+    // the grid (no sideways scrolling); each keeps at least MinimumFitColumnWidth.
+    private const int MinimumFitColumnWidth = 60;
+
     private void FitColumnsToGrid()
     {
         if (_baseColumnWidths.Count == 0 || _grid.ClientSize.Width <= 0)
@@ -235,13 +237,42 @@ public sealed partial class Form1 : Form
             return;
         }
 
-        var scale = Math.Max(1.0, (double)available / baseTotal);
+        var target = Math.Max(available, columns.Count * MinimumFitColumnWidth);
+        var widths = columns.ToDictionary(column => column.Name, column => (double)_baseColumnWidths[column.Name]);
+        for (var pass = 0; pass < 5; pass++)
+        {
+            // Columns already at the minimum stay there; the rest share what is left.
+            var flexible = widths.Where(pair => pair.Value > MinimumFitColumnWidth).Select(pair => pair.Key).ToList();
+            var pinnedTotal = widths.Where(pair => pair.Value <= MinimumFitColumnWidth).Sum(pair => pair.Value);
+            var flexibleTotal = flexible.Sum(name => widths[name]);
+            if (flexibleTotal <= 0)
+            {
+                break;
+            }
+
+            var factor = (target - pinnedTotal) / flexibleTotal;
+            if (Math.Abs(factor - 1) < 0.001)
+            {
+                break;
+            }
+
+            foreach (var name in flexible)
+            {
+                widths[name] = Math.Max(MinimumFitColumnWidth, widths[name] * factor);
+            }
+        }
+
         _fittingColumns = true;
         try
         {
-            foreach (var column in columns)
+            var assigned = 0;
+            for (var i = 0; i < columns.Count; i++)
             {
-                column.Width = (int)(_baseColumnWidths[column.Name] * scale);
+                var width = i == columns.Count - 1
+                    ? Math.Max(MinimumFitColumnWidth, target - assigned)
+                    : (int)widths[columns[i].Name];
+                columns[i].Width = width;
+                assigned += width;
             }
         }
         finally
@@ -421,6 +452,13 @@ public sealed partial class Form1 : Form
         _grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(208, 230, 247);
         _grid.DefaultCellStyle.SelectionForeColor = Color.FromArgb(26, 45, 62);
         _grid.RowTemplate.Height = 38;
+        _grid.RowTemplate.MinimumHeight = 38;
+        // Columns are squeezed to fit the view, so long text wraps and rows grow.
+        _grid.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
+        _grid.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.DisplayedCells;
+        _grid.ScrollBars = ScrollBars.Vertical;
+        _grid.ColumnHeadersDefaultCellStyle.WrapMode = DataGridViewTriState.True;
+        _grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
 
         var hint = new Label
         {
@@ -2273,33 +2311,66 @@ public sealed partial class Form1 : Form
         e.Paint(e.CellBounds, DataGridViewPaintParts.All & ~DataGridViewPaintParts.ContentForeground);
         var selected = (e.State & DataGridViewElementStates.Selected) != 0;
         var normalColor = selected ? e.CellStyle.SelectionForeColor : e.CellStyle.ForeColor;
-        const TextFormatFlags flags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix |
-                                      TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter;
+        const TextFormatFlags flags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine;
+        var graphics = e.Graphics!;
         var font = e.CellStyle.Font ?? _grid.Font;
         var bounds = new Rectangle(
             e.CellBounds.Left + e.CellStyle.Padding.Left,
-            e.CellBounds.Top,
-            Math.Max(0, e.CellBounds.Width - e.CellStyle.Padding.Horizontal),
-            e.CellBounds.Height - 1);
-        var widths = segments
-            .Select(segment => TextRenderer.MeasureText(e.Graphics!, segment.Text, font, Size.Empty, flags).Width)
-            .ToList();
-        var x = bounds.Left + Math.Max(0, (bounds.Width - widths.Sum()) / 2);
-        var clip = e.Graphics!.Clip;
-        e.Graphics.SetClip(bounds);
-        for (var i = 0; i < segments.Count && x < bounds.Right; i++)
+            e.CellBounds.Top + e.CellStyle.Padding.Top,
+            Math.Max(1, e.CellBounds.Width - e.CellStyle.Padding.Horizontal),
+            Math.Max(1, e.CellBounds.Height - e.CellStyle.Padding.Vertical - 1));
+        var spaceWidth = TextRenderer.MeasureText(graphics, "a a", font, Size.Empty, flags).Width -
+                         TextRenderer.MeasureText(graphics, "aa", font, Size.Empty, flags).Width;
+        var lineHeight = TextRenderer.MeasureText(graphics, "Ag汉", font, Size.Empty, flags).Height;
+
+        // Wrap like the grid does: CJK characters break anywhere, other text at spaces.
+        var lines = new List<List<(string Text, bool Highlight, int Width)>> { new() };
+        var lineWidth = 0;
+        foreach (var segment in segments)
         {
-            TextRenderer.DrawText(
-                e.Graphics,
-                segments[i].Text,
-                font,
-                new Rectangle(x, bounds.Top, widths[i] + 1, bounds.Height),
-                segments[i].Highlight ? HighlightWordColor : normalColor,
-                flags);
-            x += widths[i];
+            foreach (System.Text.RegularExpressions.Match unit in
+                     System.Text.RegularExpressions.Regex.Matches(
+                         segment.Text,
+                         @"\p{IsCJKUnifiedIdeographs}|[^\s\p{IsCJKUnifiedIdeographs}]+\s*|\s+"))
+            {
+                var trimmed = unit.Value.TrimEnd();
+                var width = (trimmed.Length == 0
+                                ? 0
+                                : TextRenderer.MeasureText(graphics, trimmed, font, Size.Empty, flags).Width) +
+                            (unit.Value.Length - trimmed.Length) * spaceWidth;
+                if (lineWidth + width > bounds.Width && lines[^1].Count > 0)
+                {
+                    lines.Add(new List<(string Text, bool Highlight, int Width)>());
+                    lineWidth = 0;
+                }
+
+                lines[^1].Add((unit.Value, segment.Highlight, width));
+                lineWidth += width;
+            }
         }
 
-        e.Graphics.Clip = clip;
+        var clip = graphics.Clip;
+        graphics.SetClip(bounds);
+        var y = bounds.Top + Math.Max(0, (bounds.Height - lines.Count * lineHeight) / 2);
+        foreach (var line in lines)
+        {
+            var x = bounds.Left + Math.Max(0, (bounds.Width - line.Sum(unit => unit.Width)) / 2);
+            foreach (var unit in line)
+            {
+                TextRenderer.DrawText(
+                    graphics,
+                    unit.Text,
+                    font,
+                    new Point(x, y),
+                    unit.Highlight ? HighlightWordColor : normalColor,
+                    flags);
+                x += unit.Width;
+            }
+
+            y += lineHeight;
+        }
+
+        graphics.Clip = clip;
         e.Handled = true;
     }
 
