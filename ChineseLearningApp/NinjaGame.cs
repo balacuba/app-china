@@ -52,6 +52,7 @@ internal sealed class NinjaGame : Panel
     private readonly List<Particle> _particles = [];
     private readonly List<FloatingText> _floats = [];
     private readonly List<PointF> _stars = [];
+    private readonly List<Snowflake> _snow = [];
     private readonly TextBox _input = new();
     private readonly Form1.RoundedPanel _inputFrame = new();
     private readonly Button _startButton;
@@ -60,6 +61,9 @@ internal sealed class NinjaGame : Panel
     private double _spawnIn;
     private double _flash;
     private double _twinkle;
+
+    // 0 = pale crescent, 1 = full blood moon; eases towards the lives left.
+    private double _bloodMoon;
     private int _score;
     private int _combo;
     private int _lives = MaxLives;
@@ -227,6 +231,17 @@ internal sealed class NinjaGame : Panel
         {
             _stars.Add(new PointF((float)random.NextDouble() * Width, (float)random.NextDouble() * (Sky.Height - RoofHeight - 20)));
         }
+
+        // Snow spread over the whole sky so it is already falling when the game starts.
+        _snow.Clear();
+        for (var index = 0; index < 90; index++)
+        {
+            _snow.Add(new Snowflake(
+                (float)random.NextDouble() * Width,
+                (float)random.NextDouble() * Sky.Height,
+                3f + (float)random.NextDouble() * 4f,
+                (float)(random.NextDouble() * Math.PI * 2)));
+        }
     }
 
     public void Start()
@@ -241,6 +256,8 @@ internal sealed class NinjaGame : Panel
         _combo = 0;
         _lives = MaxLives;
         _hits = 0;
+        _bloodMoon = 0;
+        TintInputFrame();
         _gameOver = false;
         _spawnIn = 0.3;
         _ninjaX = _wanderTo = Width / 2f;
@@ -366,7 +383,44 @@ internal sealed class NinjaGame : Panel
 
         _floats.RemoveAll(text => text.Life <= 0);
         _flash = Math.Max(0, _flash - dt);
+        UpdateSnow(dt, sky);
+
+        // The moon slowly reddens as hearts run out: a hint at 2, a blood moon at 1.
+        var moonTarget = _lives >= MaxLives ? 0 : _lives == 2 ? 0.45 : 1;
+        _bloodMoon += Math.Clamp(moonTarget - _bloodMoon, -dt * 0.5, dt * 0.5);
+        TintInputFrame();
         Invalidate();
+    }
+
+    // The answer box outline follows the moon, from the app's blue to blood red.
+    private void TintInputFrame()
+    {
+        var outline = Blend(Form1.Accent, Color.FromArgb(220, 38, 38), (float)_bloodMoon);
+        if (_inputFrame.OutlineColor != outline)
+        {
+            _inputFrame.OutlineColor = outline;
+            _inputFrame.Invalidate();
+        }
+    }
+
+    // Bigger flakes fall faster; each sways on its own phase and wraps back to the top.
+    private void UpdateSnow(double dt, RectangleF sky)
+    {
+        foreach (var flake in _snow)
+        {
+            flake.Phase += (float)dt * 1.4f;
+            flake.Y += (12 + flake.Size * 8) * (float)dt;
+            flake.X += (float)(Math.Sin(flake.Phase) * 14 * dt) + 6 * (float)dt;
+            if (flake.Y > sky.Bottom)
+            {
+                flake.Y = -flake.Size;
+                flake.X = (float)_random.NextDouble() * sky.Width;
+            }
+            else if (flake.X > sky.Width + 4)
+            {
+                flake.X = -4;
+            }
+        }
     }
 
     // Size of a falling word for the current mode (characters, pinyin, or both).
@@ -596,7 +650,13 @@ internal sealed class NinjaGame : Panel
         using (var skyPath = Form1.RoundedMenuRenderer.CreateRoundedPath(new RectangleF(1, 1, sky.Width - 2, sky.Height - 2), 22))
         {
             // Night sky: deep blue gradient, twinkling stars and a glowing moon.
-            using (var gradient = new LinearGradientBrush(sky, Color.FromArgb(15, 23, 42), Color.FromArgb(49, 46, 129), LinearGradientMode.Vertical))
+            // Under a blood moon the whole night turns crimson.
+            var blood = (float)_bloodMoon;
+            using (var gradient = new LinearGradientBrush(
+                sky,
+                Blend(Color.FromArgb(15, 23, 42), Color.FromArgb(42, 6, 10), blood),
+                Blend(Color.FromArgb(49, 46, 129), Color.FromArgb(127, 21, 35), blood),
+                LinearGradientMode.Vertical))
             {
                 graphics.FillPath(gradient, skyPath);
             }
@@ -612,21 +672,34 @@ internal sealed class NinjaGame : Panel
             }
 
             // A crescent moon below the lives: a disc with a second disc cut out of it.
+            // As hearts run out it fills into a full, red blood moon with a wider glow.
             var moon = new RectangleF(sky.Width - 160, 84, 58, 58);
-            using (var halo = new SolidBrush(Color.FromArgb(22, 254, 249, 195)))
+            var moonColor = Blend(Color.FromArgb(254, 249, 195), Color.FromArgb(220, 38, 38), blood);
+            using (var halo = new SolidBrush(Color.FromArgb(22 + (int)(28 * blood), moonColor)))
             {
-                graphics.FillEllipse(halo, RectangleF.Inflate(moon, 10, 10));
+                graphics.FillEllipse(halo, RectangleF.Inflate(moon, 10 + 8 * blood, 10 + 8 * blood));
             }
 
             using (var disc = new GraphicsPath())
             using (var bite = new GraphicsPath())
-            using (var moonFill = new SolidBrush(Color.FromArgb(254, 249, 195)))
+            using (var moonFill = new SolidBrush(moonColor))
             {
                 disc.AddEllipse(moon);
-                bite.AddEllipse(moon.X + 16, moon.Y - 8, 54, 54);
+                bite.AddEllipse(moon.X + 16 + 60 * blood, moon.Y - 8 - 30 * blood, 54, 54);
                 using var crescent = new Region(disc);
                 crescent.Exclude(bite);
                 graphics.FillRegion(moonFill, crescent);
+            }
+
+            // Soft flakes: a faint glow around a brighter core, bigger than the stars.
+            using (var glow = new SolidBrush(Color.FromArgb(45, 241, 245, 249)))
+            using (var core = new SolidBrush(Color.FromArgb(225, 241, 245, 249)))
+            {
+                foreach (var flake in _snow)
+                {
+                    graphics.FillEllipse(glow, flake.X - flake.Size / 2, flake.Y - flake.Size / 2, flake.Size * 2, flake.Size * 2);
+                    graphics.FillEllipse(core, flake.X, flake.Y, flake.Size, flake.Size);
+                }
             }
 
             foreach (var falling in _words)
@@ -654,6 +727,13 @@ internal sealed class NinjaGame : Panel
                 var alpha = (int)(255 * Math.Clamp(text.Life / 1.2f, 0, 1));
                 using var brush = new SolidBrush(Color.FromArgb(alpha, text.Color));
                 graphics.DrawString(text.Text, FloatFont, brush, text.X - size.Width / 2f, text.Y - size.Height / 2f);
+            }
+
+            // A red wash over everything in the sky: words, snow, roof and ninja.
+            if (blood > 0)
+            {
+                using var wash = new SolidBrush(Color.FromArgb((int)(55 * blood), 220, 38, 38));
+                graphics.FillRectangle(wash, sky);
             }
 
             if (_flash > 0)
@@ -953,6 +1033,19 @@ internal sealed class NinjaGame : Panel
         public float Dy { get; set; } = -1;
         public float Spin { get; set; }
         public FallingWord Target { get; } = target;
+    }
+
+    private static Color Blend(Color from, Color to, float amount) => Color.FromArgb(
+        (int)(from.R + (to.R - from.R) * amount),
+        (int)(from.G + (to.G - from.G) * amount),
+        (int)(from.B + (to.B - from.B) * amount));
+
+    private sealed class Snowflake(float x, float y, float size, float phase)
+    {
+        public float X { get; set; } = x;
+        public float Y { get; set; } = y;
+        public float Size { get; } = size;
+        public float Phase { get; set; } = phase;
     }
 
     private sealed class Particle(float x, float y, float vx, float vy, Color color)

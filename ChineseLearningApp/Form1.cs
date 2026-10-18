@@ -1728,15 +1728,16 @@ public sealed partial class Form1 : Form
     }
 
     // A word the ninja cuts down counts as typed right; one that lands as missed, just
-    // like typing practice (score, missed list, HSK progress).
+    // like typing practice (score, missed list, HSK progress). Either way the word is
+    // read aloud, so a missed word is still heard.
     private void RecordNinjaResult(VocabularyWord word, bool hit)
     {
+        SpeakTypedChinese(word.Chinese);
         if (hit)
         {
             _correctAnswerCount++;
             _incorrectWordCounts.Remove(word.Chinese);
             _typedCorrectWords.Add(word.Chinese);
-            SpeakTypedChinese(word.Chinese);
         }
         else
         {
