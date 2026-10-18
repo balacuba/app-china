@@ -79,6 +79,7 @@ public sealed partial class Form1 : Form
     private readonly PillLabel _flashcardPinyin = new();
     private readonly FlashcardDetailsView _flashcardDetailsLeft = new();
     private readonly FlashcardDetailsView _flashcardDetailsRight = new();
+    private readonly FlashcardDetailsView _flashcardDetailsBottom = new();
     private readonly Label _practiceMeaning = new();
     private readonly HighlightLabel _practiceEnglishMeaning = new();
     private readonly HighlightLabel _practiceFeedback = new();
@@ -1120,10 +1121,13 @@ public sealed partial class Form1 : Form
         _flashcardPinyin.Margin = Padding.Empty;
         _flashcardPinyin.Cursor = Cursors.Hand;
         _flashcardPinyin.Click += ToggleFlashcard;
-        foreach (var details in new[] { _flashcardDetailsLeft, _flashcardDetailsRight })
+        // Meanings sit side by side under the pinyin; the other blocks are single columns.
+        _flashcardDetailsBottom.TwoColumnMinWidth = 300;
+        foreach (var details in new[] { _flashcardDetailsLeft, _flashcardDetailsRight, _flashcardDetailsBottom })
         {
             details.Margin = Padding.Empty;
-            details.MaxColumns = 1;
+            details.MaxColumns = details == _flashcardDetailsBottom ? 2 : 1;
+            details.RowGap = details == _flashcardDetailsBottom ? 10 : 24;
             details.Cursor = Cursors.Hand;
             details.Click += ToggleFlashcard;
             _flashcardBackLayout.Controls.Add(details);
@@ -3145,15 +3149,15 @@ public sealed partial class Form1 : Form
     {
         private const int BadgeSize = 30;
         private const int TextIndent = 42;
-        private const int RowGap = 10;
+        public int RowGap { get; set; } = 10;
         private const int ColumnGap = 28;
-        private const int TwoColumnMinWidth = 620;
         private const int MaxContentWidth = 940;
         private static readonly Font TitleFont = new("Segoe UI Semibold", 9F);
         private static readonly Font ValueFont = new(UiFontName, 12F);
         private static readonly Font IconFont = new("Segoe UI Emoji", 12F);
         private IReadOnlyList<FlashcardDetailRow> _rows = [];
         public int MaxColumns { get; set; } = 2;
+        public int TwoColumnMinWidth { get; set; } = 620;
         private IReadOnlyList<string> _highlightKeys = [];
 
         public FlashcardDetailsView()
@@ -3722,10 +3726,11 @@ public sealed partial class Form1 : Form
         if (_showingMeaning)
         {
             _flashcardPinyin.Text = word.Pinyin;
-            var (leftRows, rightRows) = BuildFlashcardDetailRows(word);
+            var (leftRows, rightRows, bottomRows) = BuildFlashcardDetailRows(word);
             var highlightKeys = GetHighlightKeys(word.Chinese);
             _flashcardDetailsLeft.SetContent(leftRows, highlightKeys);
             _flashcardDetailsRight.SetContent(rightRows, highlightKeys);
+            _flashcardDetailsBottom.SetContent(bottomRows, highlightKeys);
             _flashcardFace.Visible = false;
             _flashcardBackLayout.Visible = true;
             CenterFlashcardMeaningContent();
@@ -3844,17 +3849,28 @@ public sealed partial class Form1 : Form
         var height = _flashcardBackLayout.ClientSize.Height;
         const int sidePadding = 24;
         const int gap = 28;
-        var sideWidth = (width - pinyinSize.Width) / 2 - sidePadding - gap;
-        if (sideWidth >= 220)
+        const int meaningGap = 28;
+        var sideWidth = Math.Min(360, (int)((width - 2 * sidePadding) * 0.28));
+        var middleWidth = width - 2 * (sidePadding + sideWidth + gap);
+        if (sideWidth >= 220 && middleWidth >= Math.Max(300, pinyinSize.Width))
         {
-            // Wide card: Vietnamese | pinyin | Chinese & English, each centred vertically.
+            // Wide card: grammar | pinyin with the meanings below | examples.
             var leftHeight = _flashcardDetailsLeft.GetContentHeight(sideWidth);
             var rightHeight = _flashcardDetailsRight.GetContentHeight(sideWidth);
+            var bottomHeight = _flashcardDetailsBottom.GetContentHeight(middleWidth);
+            // The pinyin stays centred unless the meanings would run off the card.
+            var middleTotal = pinyinSize.Height + (bottomHeight > 0 ? meaningGap + bottomHeight : 0);
+            var pinyinTop = Math.Max(0, Math.Min((height - pinyinSize.Height) / 2, height - middleTotal));
             _flashcardPinyin.Bounds = new Rectangle(
                 (width - pinyinSize.Width) / 2,
-                (height - pinyinSize.Height) / 2,
+                pinyinTop,
                 pinyinSize.Width,
                 pinyinSize.Height);
+            _flashcardDetailsBottom.Bounds = new Rectangle(
+                (width - middleWidth) / 2,
+                pinyinTop + pinyinSize.Height + meaningGap,
+                middleWidth,
+                Math.Max(0, Math.Min(bottomHeight, height - pinyinTop - pinyinSize.Height - meaningGap)));
             _flashcardDetailsLeft.Bounds = new Rectangle(
                 sidePadding,
                 Math.Max(0, (height - leftHeight) / 2),
@@ -3868,14 +3884,17 @@ public sealed partial class Form1 : Form
             return;
         }
 
-        // Narrow card: pinyin on top, then the Vietnamese and the English blocks.
+        // Narrow card: pinyin on top, then the meanings, grammar and examples.
         var stackWidth = maximumTextWidth;
+        var bottomStack = _flashcardDetailsBottom.GetContentHeight(stackWidth);
         var leftStack = _flashcardDetailsLeft.GetContentHeight(stackWidth);
         var rightStack = _flashcardDetailsRight.GetContentHeight(stackWidth);
-        var totalHeight = pinyinSize.Height + 14 + leftStack + 10 + rightStack;
+        var totalHeight = pinyinSize.Height + 14 + bottomStack + 10 + leftStack + 10 + rightStack;
         var top = Math.Max(0, (height - totalHeight) / 2);
         _flashcardPinyin.Bounds = new Rectangle((width - pinyinSize.Width) / 2, top, pinyinSize.Width, pinyinSize.Height);
         top += pinyinSize.Height + 14;
+        _flashcardDetailsBottom.Bounds = new Rectangle(16, top, stackWidth, bottomStack);
+        top += bottomStack + 10;
         _flashcardDetailsLeft.Bounds = new Rectangle(16, top, stackWidth, leftStack);
         top += leftStack + 10;
         _flashcardDetailsRight.Bounds = new Rectangle(16, top, stackWidth, rightStack);
@@ -4409,10 +4428,13 @@ public sealed partial class Form1 : Form
         string.IsNullOrWhiteSpace(english) ? "(chưa có)" : english;
 
     // Left side: the Vietnamese details; right side: the Chinese example and English.
-    private static (List<FlashcardDetailRow> Left, List<FlashcardDetailRow> Right) BuildFlashcardDetailRows(VocabularyWord word)
+    // Left: grammar. Right: the three examples. Bottom (under the pinyin): the meanings.
+    private static (List<FlashcardDetailRow> Left, List<FlashcardDetailRow> Right, List<FlashcardDetailRow> Bottom)
+        BuildFlashcardDetailRows(VocabularyWord word)
     {
         var left = new List<FlashcardDetailRow>();
         var right = new List<FlashcardDetailRow>();
+        var bottom = new List<FlashcardDetailRow>();
         void Add(List<FlashcardDetailRow> side, string icon, Color badge, Color iconColor, string title, string value)
         {
             if (!string.IsNullOrWhiteSpace(value))
@@ -4421,14 +4443,14 @@ public sealed partial class Form1 : Form
             }
         }
 
-        Add(left, "🌸", Color.FromArgb(252, 231, 243), Color.FromArgb(219, 39, 119), "Nghĩa tiếng Việt", word.Vietnamese);
-        Add(left, "🍀", Color.FromArgb(220, 252, 231), Color.FromArgb(22, 163, 74), "Ví dụ tiếng Việt", word.VietnameseExample);
+        Add(left, "🧩", Color.FromArgb(237, 233, 254), Color.FromArgb(124, 58, 237), "Ngữ pháp", word.EnglishGrammar);
         Add(left, "💡", Color.FromArgb(254, 249, 195), Color.FromArgb(202, 138, 4), "Ngữ pháp tiếng Việt", word.VietnameseGrammar);
         Add(right, "🏮", Color.FromArgb(254, 226, 226), Color.FromArgb(220, 38, 38), "Ví dụ tiếng Trung", word.ChineseExample);
-        Add(right, "🌍", Color.FromArgb(219, 234, 254), Color.FromArgb(37, 99, 235), "Nghĩa tiếng Anh", FormatEnglishMeaning(word.English));
         Add(right, "✏", Color.FromArgb(254, 243, 199), Color.FromArgb(217, 119, 6), "Ví dụ tiếng Anh", word.EnglishExample);
-        Add(right, "🧩", Color.FromArgb(237, 233, 254), Color.FromArgb(124, 58, 237), "Ngữ pháp", word.EnglishGrammar);
-        return (left, right);
+        Add(right, "🍀", Color.FromArgb(220, 252, 231), Color.FromArgb(22, 163, 74), "Ví dụ tiếng Việt", word.VietnameseExample);
+        Add(bottom, "🌸", Color.FromArgb(252, 231, 243), Color.FromArgb(219, 39, 119), "Nghĩa tiếng Việt", word.Vietnamese);
+        Add(bottom, "🌍", Color.FromArgb(219, 234, 254), Color.FromArgb(37, 99, 235), "Nghĩa tiếng Anh", FormatEnglishMeaning(word.English));
+        return (left, right, bottom);
     }
 
     private void PracticeTab_SelectedIndexChanged(object? sender, EventArgs e)
