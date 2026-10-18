@@ -511,10 +511,12 @@ public sealed partial class Form1 : Form
     private sealed record HomeDestination(TabPage Page, string Icon, string Description, Color BadgeColor);
 
     // Home: a greeting, a short summary of the word list and one big card per page.
+    // Home: a greeting, study statistics, one big card per page and the study
+    // progress for each HSK level. Everything is refreshed on every visit.
     private TabPage BuildHomePage(TabControl tabs, IReadOnlyList<HomeDestination> destinations)
     {
         var page = CreatePage("Trang chủ");
-        var host = new Panel { Dock = DockStyle.Fill, BackColor = PageColor };
+        var host = new Panel { Dock = DockStyle.Fill, BackColor = PageColor, AutoScroll = true };
         var title = new Label
         {
             AutoSize = true,
@@ -529,17 +531,34 @@ public sealed partial class Form1 : Form
             ForeColor = MutedTextColor,
             Text = "Hôm nay bạn muốn học gì?"
         };
-        var summary = new PillLabel
-        {
-            AutoSize = false,
-            Font = new Font(UiFontName, 11F, FontStyle.Bold),
-            ForeColor = Accent,
-            TextAlign = ContentAlignment.MiddleCenter
-        };
-        void UpdateSummary()
+
+        var totalCard = new StatCard { Icon = "📖", BadgeColor = Color.FromArgb(219, 234, 254), Caption = "Tổng từ vựng" };
+        var studyingCard = new StatCard { Icon = "✅", BadgeColor = Color.FromArgb(220, 252, 231), Caption = "Đang học" };
+        var missedCard = new StatCard { Icon = "❌", BadgeColor = Color.FromArgb(254, 226, 226), Caption = "Từ gõ sai" };
+        var practiceCard = new StatCard { Icon = "🎯", BadgeColor = Color.FromArgb(254, 243, 199), Caption = "Luyện gõ phiên này" };
+        var statCards = new List<StatCard> { totalCard, studyingCard, missedCard, practiceCard };
+        var hskProgress = new HskProgressView();
+
+        void UpdateStatistics()
         {
             var selected = _words.Count(word => word.IsSelected);
-            summary.Text = $"📖  {_words.Count} từ vựng   •   ✅  {selected} từ đang chọn học";
+            totalCard.Value = $"{_words.Count}";
+            totalCard.Note = "từ HSK 1 đến HSK 7-9";
+            studyingCard.Value = $"{selected}";
+            studyingCard.Note = _words.Count == 0 ? "Chưa có từ" : $"{selected * 100.0 / _words.Count:0.#}% tổng số từ";
+            missedCard.Value = $"{_incorrectWordCounts.Count}";
+            missedCard.Note = _incorrectWordCounts.Count == 0 ? "Không có từ nào sai 🎉" : "Gõ đúng để xóa khỏi danh sách";
+            var answered = _correctAnswerCount + _wrongAnswerCount;
+            practiceCard.Value = answered == 0 ? "—" : $"{_correctAnswerCount}/{answered}";
+            practiceCard.Note = answered == 0 ? "Chưa luyện trong phiên này" : $"Chính xác {_correctAnswerCount * 100.0 / answered:0}%";
+            statCards.ForEach(card => card.Invalidate());
+
+            var levels = HskFilterLevels.Select(level => (Name: level, Words: _words.Where(word => word.HskLevel == level).ToList()))
+                .Append((Name: "Khác", Words: _words.Where(word => !HskFilterLevels.Contains(word.HskLevel)).ToList()))
+                .Where(level => level.Words.Count > 0)
+                .Select(level => new HskProgressRow(level.Name, level.Words.Count, level.Words.Count(word => word.IsSelected)))
+                .ToList();
+            hskProgress.SetRows(levels);
         }
 
         var tiles = destinations.Select(destination =>
@@ -557,40 +576,56 @@ public sealed partial class Form1 : Form
 
         host.Controls.Add(title);
         host.Controls.Add(subtitle);
-        host.Controls.Add(summary);
+        host.Controls.AddRange(statCards.ToArray());
         host.Controls.AddRange(tiles.ToArray());
+        host.Controls.Add(hskProgress);
 
-        // Centre everything; four cards in a row when there is room, else two rows of two.
+        // Centre everything; four cards per row when there is room, else two.
         void LayoutHome()
         {
-            UpdateSummary();
-            var summaryText = TextRenderer.MeasureText(summary.Text, summary.Font);
-            summary.Size = new Size(summaryText.Width + 48, summaryText.Height + 18);
+            UpdateStatistics();
             const int tileWidth = 280;
             const int tileHeight = 190;
+            const int statHeight = 104;
             const int gap = 24;
             var columns = host.ClientSize.Width >= 4 * tileWidth + 3 * gap + 80 ? 4 : 2;
-            var rows = (tiles.Count + columns - 1) / columns;
             var gridWidth = columns * tileWidth + (columns - 1) * gap;
-            var gridHeight = rows * tileHeight + (rows - 1) * gap;
-            var totalHeight = title.Height + 8 + subtitle.Height + 20 + summary.Height + 40 + gridHeight;
-            var top = Math.Max(20, (host.ClientSize.Height - totalHeight) / 2);
-            var centerX = host.ClientSize.Width / 2;
+            int GridHeight(int count, int itemHeight)
+            {
+                var rows = (count + columns - 1) / columns;
+                return rows * itemHeight + (rows - 1) * gap;
+            }
+
+            var statsHeight = GridHeight(statCards.Count, statHeight);
+            var tilesHeight = GridHeight(tiles.Count, tileHeight);
+            var progressHeight = hskProgress.GetPreferredHeight(gridWidth);
+            var totalHeight = title.Height + 8 + subtitle.Height + 28 + statsHeight + gap + tilesHeight + gap + progressHeight;
+            var scroll = host.AutoScrollPosition;
+            var top = Math.Max(20, (host.ClientSize.Height - totalHeight) / 2) + scroll.Y;
+            var centerX = host.ClientSize.Width / 2 + scroll.X;
             title.Location = new Point(centerX - title.Width / 2, top);
             top += title.Height + 8;
             subtitle.Location = new Point(centerX - subtitle.Width / 2, top);
-            top += subtitle.Height + 20;
-            summary.Location = new Point(centerX - summary.Width / 2, top);
-            top += summary.Height + 40;
+            top += subtitle.Height + 28;
             var left = centerX - gridWidth / 2;
-            for (var index = 0; index < tiles.Count; index++)
+            void PlaceGrid(IReadOnlyList<Control> items, int itemHeight)
             {
-                tiles[index].Bounds = new Rectangle(
-                    left + index % columns * (tileWidth + gap),
-                    top + index / columns * (tileHeight + gap),
-                    tileWidth,
-                    tileHeight);
+                for (var index = 0; index < items.Count; index++)
+                {
+                    items[index].Bounds = new Rectangle(
+                        left + index % columns * (tileWidth + gap),
+                        top + index / columns * (itemHeight + gap),
+                        tileWidth,
+                        itemHeight);
+                }
             }
+
+            PlaceGrid(statCards, statHeight);
+            top += statsHeight + gap;
+            PlaceGrid(tiles, tileHeight);
+            top += tilesHeight + gap;
+            hskProgress.Bounds = new Rectangle(left, top, gridWidth, progressHeight);
+            host.AutoScrollMinSize = new Size(0, totalHeight + 40);
         }
 
         host.Resize += (_, _) => LayoutHome();
@@ -604,6 +639,153 @@ public sealed partial class Form1 : Form
         };
         page.Controls.Add(host);
         return page;
+    }
+
+    private sealed record HskProgressRow(string Level, int Total, int Studying);
+
+    // A rounded white statistics card: emoji badge, a big value, a caption and
+    // a muted note underneath.
+    private sealed class StatCard : Control
+    {
+        private static readonly Font IconFont = new("Segoe UI Emoji", 15F);
+        private static readonly Font ValueFont = new("Segoe UI Semibold", 20F);
+        private static readonly Font CaptionFont = new("Segoe UI Semibold", 10F);
+        private static readonly Font NoteFont = new(UiFontName, 9F);
+        public string Icon { get; set; } = "";
+        public Color BadgeColor { get; set; } = AccentSoft;
+        public string Caption { get; set; } = "";
+        public string Value { get; set; } = "";
+        public string Note { get; set; } = "";
+
+        public StatCard()
+        {
+            SetStyle(
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw |
+                ControlStyles.UserPaint,
+                true);
+            BackColor = PageColor;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var graphics = e.Graphics;
+            graphics.Clear(BackColor);
+            graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using (var path = RoundedMenuRenderer.CreateRoundedPath(new RectangleF(1, 1, Width - 3, Height - 3), 18))
+            using (var fill = new SolidBrush(SurfaceColor))
+            using (var outline = new Pen(BorderColor, 1.5F))
+            {
+                graphics.FillPath(fill, path);
+                graphics.DrawPath(outline, path);
+            }
+
+            const int badge = 46;
+            var badgeBounds = new Rectangle(18, (Height - badge) / 2, badge, badge);
+            using (var badgeFill = new SolidBrush(BadgeColor))
+            {
+                graphics.FillEllipse(badgeFill, badgeBounds);
+            }
+
+            TextRenderer.DrawText(graphics, Icon, IconFont, badgeBounds, TextColor,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            var textLeft = badgeBounds.Right + 14;
+            var textWidth = Width - textLeft - 12;
+            TextRenderer.DrawText(graphics, Caption, CaptionFont, new Rectangle(textLeft, 14, textWidth, 20),
+                MutedTextColor, TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
+            TextRenderer.DrawText(graphics, Value, ValueFont, new Rectangle(textLeft, 32, textWidth, 38),
+                TextColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            TextRenderer.DrawText(graphics, Note, NoteFont, new Rectangle(textLeft, 72, textWidth, 20),
+                MutedTextColor, TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
+        }
+    }
+
+    // A rounded card listing each HSK level with a rounded progress bar of how
+    // many of its words are being studied; two levels per row.
+    private sealed class HskProgressView : Control
+    {
+        private const int HeaderHeight = 58;
+        private const int RowHeight = 40;
+        private const int Padding = 22;
+        private static readonly Font TitleFont = new("Segoe UI Semibold", 13F);
+        private static readonly Font LevelFont = new("Segoe UI Semibold", 10.5F);
+        private static readonly Font CountFont = new(UiFontName, 9.5F);
+        private static readonly Color[] BarColors =
+        [
+            Color.FromArgb(34, 197, 94), Color.FromArgb(20, 184, 166), Color.FromArgb(59, 130, 246),
+            Color.FromArgb(99, 102, 241), Color.FromArgb(168, 85, 247), Color.FromArgb(236, 72, 153),
+            Color.FromArgb(249, 115, 22), Color.FromArgb(148, 163, 184)
+        ];
+        private IReadOnlyList<HskProgressRow> _rows = [];
+
+        public HskProgressView()
+        {
+            SetStyle(
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw |
+                ControlStyles.UserPaint,
+                true);
+            BackColor = PageColor;
+        }
+
+        public void SetRows(IReadOnlyList<HskProgressRow> rows)
+        {
+            _rows = rows;
+            Invalidate();
+        }
+
+        public int GetPreferredHeight(int width) =>
+            HeaderHeight + (_rows.Count + 1) / 2 * RowHeight + Padding;
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var graphics = e.Graphics;
+            graphics.Clear(BackColor);
+            graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using (var path = RoundedMenuRenderer.CreateRoundedPath(new RectangleF(1, 1, Width - 3, Height - 3), 18))
+            using (var fill = new SolidBrush(SurfaceColor))
+            using (var outline = new Pen(BorderColor, 1.5F))
+            {
+                graphics.FillPath(fill, path);
+                graphics.DrawPath(outline, path);
+            }
+
+            TextRenderer.DrawText(graphics, "📊  Tiến độ theo cấp HSK", TitleFont, new Rectangle(Padding, 16, Width - 2 * Padding, 28),
+                TextColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+            const int columnGap = 36;
+            var columnWidth = (Width - 2 * Padding - columnGap) / 2;
+            for (var index = 0; index < _rows.Count; index++)
+            {
+                var row = _rows[index];
+                var left = Padding + index % 2 * (columnWidth + columnGap);
+                var top = HeaderHeight + index / 2 * RowHeight;
+                const int levelWidth = 78;
+                const int countWidth = 150;
+                TextRenderer.DrawText(graphics, row.Level, LevelFont, new Rectangle(left, top, levelWidth, 26),
+                    TextColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+                var track = new RectangleF(left + levelWidth, top + 8, columnWidth - levelWidth - countWidth - 10, 10);
+                using (var trackPath = RoundedMenuRenderer.CreateRoundedPath(track, 5))
+                using (var trackFill = new SolidBrush(Color.FromArgb(241, 245, 249)))
+                {
+                    graphics.FillPath(trackFill, trackPath);
+                }
+
+                if (row.Total > 0 && row.Studying > 0)
+                {
+                    var filled = new RectangleF(track.X, track.Y, Math.Max(track.Height, track.Width * row.Studying / row.Total), track.Height);
+                    using var barPath = RoundedMenuRenderer.CreateRoundedPath(filled, 5);
+                    using var barFill = new SolidBrush(BarColors[index % BarColors.Length]);
+                    graphics.FillPath(barFill, barPath);
+                }
+
+                var percent = row.Total == 0 ? 0 : row.Studying * 100.0 / row.Total;
+                TextRenderer.DrawText(graphics, $"{row.Studying}/{row.Total} từ • {percent:0}%", CountFont,
+                    new Rectangle(left + columnWidth - countWidth, top, countWidth, 26),
+                    MutedTextColor, TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
+            }
+        }
     }
 
     private TabPage BuildVocabularyPage()
