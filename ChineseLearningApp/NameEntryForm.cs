@@ -14,11 +14,13 @@ internal sealed class NameEntryForm : Form
     {
         Text = "Ứng dụng học tiếng trung của Tuấn Anh!";
         StartPosition = FormStartPosition.CenterScreen;
-        FormBorderStyle = FormBorderStyle.FixedDialog;
+        // Borderless with rounded corners: drag it by the blue header, close
+        // it with ✕, Esc or "Thoát". The title still shows in the taskbar.
+        FormBorderStyle = FormBorderStyle.None;
         MaximizeBox = false;
         MinimizeBox = false;
         ShowInTaskbar = true;
-        ClientSize = new Size(460, 438);
+        ClientSize = new Size(460, 448);
         Font = new Font(Form1.UiFontName, 10F);
         BackColor = Form1.SurfaceColor;
 
@@ -41,20 +43,56 @@ internal sealed class NameEntryForm : Form
             BackColor = Form1.Accent,
             TextAlign = ContentAlignment.MiddleCenter
         };
-        header.Controls.AddRange([brand, welcome]);
+        var close = new Label
+        {
+            AutoSize = false,
+            Size = new Size(34, 34),
+            Location = new Point(ClientSize.Width - 44, 10),
+            Text = "✕",
+            Font = new Font(Form1.UiFontName, 12F),
+            ForeColor = Color.FromArgb(219, 234, 254),
+            BackColor = Form1.Accent,
+            TextAlign = ContentAlignment.MiddleCenter,
+            Cursor = Cursors.Hand
+        };
+        close.MouseEnter += (_, _) => close.ForeColor = Color.White;
+        close.MouseLeave += (_, _) => close.ForeColor = Color.FromArgb(219, 234, 254);
+        close.Click += (_, _) => Close();
+        header.Controls.AddRange([brand, welcome, close]);
+        foreach (Control dragArea in new Control[] { header, brand, welcome })
+        {
+            dragArea.MouseDown += (_, e) =>
+            {
+                if (e.Button == MouseButtons.Left)
+                {
+                    // Let Windows move the window as if its title bar were dragged.
+                    ReleaseCapture();
+                    SendMessage(Handle, 0xA1, (IntPtr)2, IntPtr.Zero);
+                }
+            };
+        }
+
+        // The name section fills the white area between header and footer.
+        var body = new Panel
+        {
+            Location = new Point(0, 120),
+            Size = new Size(ClientSize.Width, ClientSize.Height - 120 - 96),
+            BackColor = Form1.SurfaceColor
+        };
 
         var prompt = new Label
         {
             AutoSize = true,
-            Location = new Point(36, 144),
+            Location = new Point(36, 30),
             Text = "Tên bạn là gì?",
             Font = new Font("Segoe UI Semibold", 11.5F),
-            ForeColor = Form1.TextColor
+            ForeColor = Form1.TextColor,
+            BackColor = Form1.SurfaceColor
         };
 
         // Rounded name box; the outline turns blue while typing.
-        _nameFrame.Location = new Point(36, 176);
-        _nameFrame.Size = new Size(ClientSize.Width - 72, 44);
+        _nameFrame.Location = new Point(36, 62);
+        _nameFrame.Size = new Size(body.Width - 72, 44);
         // Pill-shaped: the radius is half the inner height.
         _nameFrame.Radius = 20;
         _nameFrame.FillColor = Form1.PageColor;
@@ -74,7 +112,8 @@ internal sealed class NameEntryForm : Form
 
         _validationLabel.AutoSize = true;
         _validationLabel.ForeColor = Form1.DangerText;
-        _validationLabel.Location = new Point(38, 226);
+        _validationLabel.Location = new Point(38, 110);
+        _validationLabel.BackColor = Form1.SurfaceColor;
 
         var continueButton = Form1.CreateButton("Bắt đầu học  →", ContinueButton_Click);
         continueButton.AutoSize = false;
@@ -87,14 +126,15 @@ internal sealed class NameEntryForm : Form
         ((Form1.RoundedButton)cancelButton).Radius = 20;
         // Both buttons as one group, centred under the name box.
         var buttonsLeft = _nameFrame.Left + (_nameFrame.Width - (cancelButton.Width + 12 + continueButton.Width)) / 2;
-        cancelButton.Location = new Point(buttonsLeft, 258);
-        continueButton.Location = new Point(cancelButton.Right + 12, 258);
+        cancelButton.Location = new Point(buttonsLeft, 140);
+        continueButton.Location = new Point(cancelButton.Right + 12, 140);
         cancelButton.DialogResult = DialogResult.Cancel;
 
         // Author's details along the bottom.
         var footer = new AuthorFooter { Dock = DockStyle.Bottom, Height = 96 };
 
-        Controls.AddRange([header, prompt, _nameFrame, _validationLabel, cancelButton, continueButton, footer]);
+        body.Controls.AddRange([prompt, _nameFrame, _validationLabel, cancelButton, continueButton]);
+        Controls.AddRange([header, body, footer]);
         AcceptButton = continueButton;
         CancelButton = cancelButton;
         // Start with the name from last time, selected so it can be retyped.
@@ -106,8 +146,8 @@ internal sealed class NameEntryForm : Form
         };
     }
 
-    // "Made with ♥ by Tuấn Anh" over two rounded contact chips (phone, mail),
-    // on a soft band with a thin line on top.
+    // "Made with ♥ by Tuấn Anh" over a rounded mail chip,
+    // on a soft tinted band.
     private sealed class AuthorFooter : Control
     {
         private static readonly Font PlainFont = new(Form1.UiFontName, 10F);
@@ -118,7 +158,6 @@ internal sealed class NameEntryForm : Form
 
         private static readonly (string Icon, string Text, Color Fill, Color Ink)[] Chips =
         [
-            ("📞", "0858344567", Color.FromArgb(220, 252, 231), Color.FromArgb(21, 128, 61)),
             ("✉️", "camlinh.tk@gmail.com", Color.FromArgb(219, 234, 254), Color.FromArgb(29, 78, 216))
         ];
 
@@ -135,13 +174,10 @@ internal sealed class NameEntryForm : Form
 
         protected override void OnPaint(PaintEventArgs e)
         {
+            // A softly tinted band with straight edges.
             var graphics = e.Graphics;
-            graphics.Clear(BackColor);
+            graphics.Clear(Color.FromArgb(232, 238, 247));
             graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-            using (var line = new Pen(Form1.BorderColor))
-            {
-                graphics.DrawLine(line, 0, 0, Width, 0);
-            }
 
             // Line 1: "Made with ♥ by Tuấn Anh", centred, name in accent.
             const TextFormatFlags flags = TextFormatFlags.NoPadding | TextFormatFlags.VerticalCenter;
@@ -157,7 +193,7 @@ internal sealed class NameEntryForm : Form
             for (var index = 0; index < parts.Length; index++)
             {
                 TextRenderer.DrawText(graphics, parts[index].Text, parts[index].Font,
-                    new Rectangle(x, 14, widths[index] + 2, 24), parts[index].Color, flags);
+                    new Rectangle(x, 16, widths[index] + 2, 24), parts[index].Color, flags);
                 x += widths[index];
             }
 
@@ -186,6 +222,33 @@ internal sealed class NameEntryForm : Form
                 x += chipWidths[index] + gap;
             }
         }
+    }
+
+    private const int CornerRadius = 18;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool ReleaseCapture();
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
+
+    // A soft drop shadow, since there is no window frame.
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var parameters = base.CreateParams;
+            parameters.ClassStyle |= 0x00020000; // CS_DROPSHADOW
+            return parameters;
+        }
+    }
+
+    // Clip the window to a rounded rectangle (all four corners).
+    protected override void OnSizeChanged(EventArgs e)
+    {
+        base.OnSizeChanged(e);
+        using var path = Form1.RoundedMenuRenderer.CreateRoundedPath(new RectangleF(0, 0, Width, Height), CornerRadius);
+        Region = new Region(path);
     }
 
     private void SetNameOutline(Color color, float width)
