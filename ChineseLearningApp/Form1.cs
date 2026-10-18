@@ -1193,7 +1193,22 @@ public sealed partial class Form1 : Form
         string[] practiceModes = ["Gõ từ vựng", "Gõ câu ví dụ"];
         var practiceModeBox = new RoundedButton();
         StyleButton(practiceModeBox, ButtonKind.Secondary);
-        var practiceModeMenu = new ContextMenuStrip { Font = new Font(UiFontName, 10.5F), ShowImageMargin = false };
+        var practiceModeMenu = new ContextMenuStrip
+        {
+            Font = new Font(UiFontName, 10.5F),
+            ShowImageMargin = false,
+            ShowCheckMargin = false,
+            DropShadowEnabled = false,
+            Padding = new Padding(4),
+            Renderer = new RoundedMenuRenderer()
+        };
+        // Rounded outline for the menu window itself.
+        practiceModeMenu.SizeChanged += (_, _) =>
+        {
+            using var path = RoundedMenuRenderer.CreateRoundedPath(
+                new RectangleF(0, 0, practiceModeMenu.Width, practiceModeMenu.Height), 10);
+            practiceModeMenu.Region = new Region(path);
+        };
         void SelectPracticeMode(int index)
         {
             practiceModeBox.Text = $"{practiceModes[index]}  ▾";
@@ -1208,10 +1223,25 @@ public sealed partial class Form1 : Form
         for (var i = 0; i < practiceModes.Length; i++)
         {
             var index = i;
-            practiceModeMenu.Items.Add(new ToolStripMenuItem(practiceModes[i], null, (_, _) => SelectPracticeMode(index)));
+            practiceModeMenu.Items.Add(new ToolStripMenuItem(practiceModes[i], null, (_, _) => SelectPracticeMode(index))
+            {
+                AutoSize = false,
+                TextAlign = ContentAlignment.MiddleCenter
+            });
         }
 
-        practiceModeBox.Click += (_, _) => practiceModeMenu.Show(practiceModeBox, new Point(0, practiceModeBox.Height));
+        // The menu opens just below the button and matches its width.
+        practiceModeBox.Click += (_, _) =>
+        {
+            foreach (ToolStripItem item in practiceModeMenu.Items)
+            {
+                item.Size = new Size(practiceModeBox.Width - practiceModeMenu.Padding.Horizontal, 36);
+            }
+
+            practiceModeMenu.MinimumSize = new Size(practiceModeBox.Width, 0);
+            practiceModeMenu.MaximumSize = new Size(practiceModeBox.Width, 0);
+            practiceModeMenu.Show(practiceModeBox, new Point(0, practiceModeBox.Height + 4));
+        };
         SelectPracticeMode(0);
         practiceActions.Controls.AddRange([continueStudyButton, _pausePracticeButton, _skipPracticeButton]);
         _practiceTimerLabel.Dock = DockStyle.Fill;
@@ -2826,6 +2856,71 @@ public sealed partial class Form1 : Form
             path.AddArc(bounds.Left, bounds.Bottom - diameter, diameter, diameter, 90, 90);
             path.CloseFigure();
             return path;
+        }
+    }
+
+    // Menu look matching the rounded buttons: white body with a thin border,
+    // rounded soft-blue hover, and the checked item in bold accent text.
+    private sealed class RoundedMenuRenderer : ToolStripProfessionalRenderer
+    {
+        public static System.Drawing.Drawing2D.GraphicsPath CreateRoundedPath(RectangleF bounds, float radius)
+        {
+            var diameter = radius * 2F;
+            var path = new System.Drawing.Drawing2D.GraphicsPath();
+            path.AddArc(bounds.Left, bounds.Top, diameter, diameter, 180, 90);
+            path.AddArc(bounds.Right - diameter, bounds.Top, diameter, diameter, 270, 90);
+            path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
+            path.AddArc(bounds.Left, bounds.Bottom - diameter, diameter, diameter, 90, 90);
+            path.CloseFigure();
+            return path;
+        }
+
+        protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e) =>
+            e.Graphics.Clear(SurfaceColor);
+
+        protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
+        {
+            e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using var path = CreateRoundedPath(
+                new RectangleF(0.5F, 0.5F, e.ToolStrip.Width - 1.5F, e.ToolStrip.Height - 1.5F),
+                10);
+            using var pen = new Pen(Color.FromArgb(147, 187, 250), 1.5F);
+            e.Graphics.DrawPath(pen, path);
+        }
+
+        protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
+        {
+            var isChecked = e.Item is ToolStripMenuItem { Checked: true };
+            if (!e.Item.Selected && !isChecked)
+            {
+                return;
+            }
+
+            e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using var path = CreateRoundedPath(new RectangleF(2, 1, e.Item.Width - 4, e.Item.Height - 2), 8);
+            using var brush = new SolidBrush(e.Item.Selected ? AccentSoftHover : AccentSoft);
+            e.Graphics.FillPath(brush, path);
+        }
+
+        protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
+        {
+            if (e.Item is ToolStripMenuItem { Checked: true })
+            {
+                e.TextColor = Accent;
+                e.TextFont = new Font("Segoe UI Semibold", e.TextFont?.Size ?? 10.5F);
+            }
+            else
+            {
+                e.TextColor = TextColor;
+            }
+
+            e.TextRectangle = new Rectangle(Point.Empty, e.Item.Size);
+            e.TextFormat = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine;
+            base.OnRenderItemText(e);
+        }
+
+        protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
+        {
         }
     }
 
