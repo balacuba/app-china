@@ -26,6 +26,9 @@ internal sealed class NinjaGame : Panel
     private const int MaxLives = 3;
     private const int HitsPerLevel = 8;
     private const float RoofHeight = 26;
+
+    // How fast a big meteor turns, in radians per second.
+    private const float HeadSpin = 1.6f;
     // Words further away than this (sideways) get a diagonal throw instead of a run.
     private const float DiagonalThrowDistance = 300;
 
@@ -1004,9 +1007,10 @@ internal sealed class NinjaGame : Panel
             ]);
         }
 
-        foreach (var (x, y, size) in Fragments(falling))
+        // Small meteors on the far side of their orbit pass behind the head.
+        foreach (var fragment in Fragments(falling).Where(fragment => !fragment.Front))
         {
-            DrawFragment(graphics, x, y, size, size * 12 + 22);
+            DrawFragment(graphics, fragment);
         }
 
         // The head: no smooth ball but a ragged blaze. A ring of red-orange flame
@@ -1030,12 +1034,27 @@ internal sealed class NinjaGame : Panel
             FocusScales = new PointF(0.55f, 0.55f)
         };
         graphics.FillPath(burn, headPath);
+
+        // Licks of orange flame rise through the white-hot middle from its lower edge,
+        // drifting from side to side as the blaze turns.
+        for (var lick = 0; lick < 3; lick++)
+        {
+            var drift = MathF.Sin(time * HeadSpin + lick * 2.1f + seed) * radius * 0.45f;
+            DrawFlame(graphics, centreX + drift, centreY + radius * 0.55f, radius * (1.1f + 0.2f * lick), radius * 0.22f,
+                seed + 11 + lick, time, Color.FromArgb(234, 88, 12), 170, wobble: 0.8f);
+        }
+
+        // ...and in front of it on the near side.
+        foreach (var fragment in Fragments(falling).Where(fragment => fragment.Front))
+        {
+            DrawFragment(graphics, fragment);
+        }
     }
 
     // A rough, flickering outline of flame round a centre: points alternate between
     // hollows on the rim and tongue tips. Every tongue is swept up towards the trail,
-    // as if the fall blows the fire back: its tip leans only a little outwards and
-    // mostly upwards. Tongues waver with time and are longest on the sides and top,
+    // as if the fall blows the fire back: its tip rises and leans in towards the
+    // middle. Tongues waver with time and are longest on the sides and top,
     // shortest on the leading (lower) edge.
     private static GraphicsPath RaggedBlaze(float centreX, float centreY, float radius, float roughness, float seed, float time)
     {
@@ -1043,7 +1062,8 @@ internal sealed class NinjaGame : Panel
         var outline = new PointF[points];
         for (var index = 0; index < points; index++)
         {
-            var angle = index * MathF.PI * 2 / points;
+            // The whole pattern turns with time, so the blaze spins as it falls.
+            var angle = index * MathF.PI * 2 / points + time * HeadSpin;
             var cos = MathF.Cos(angle);
             var sin = MathF.Sin(angle);
             var hash = MathF.Abs(MathF.Sin(seed * 9.1f + index * 37.7f)) * 1000 % 1f;
@@ -1060,7 +1080,9 @@ internal sealed class NinjaGame : Panel
             var tongue = radius * roughness * (0.5f + 1.3f * hash) * flicker * (1.3f - 1.05f * down) * 2.2f;
             var baseX = centreX + cos * radius * wave;
             var baseY = centreY + sin * radius * wave;
-            outline[index] = new PointF(baseX + cos * tongue * 0.3f, baseY + sin * tongue * 0.3f - tongue);
+            // Tips lean in towards the middle as they rise, so the blaze closes up
+            // into the trail like a flame.
+            outline[index] = new PointF(baseX - cos * tongue * 0.4f, baseY - tongue);
         }
 
         // A low-tension curve keeps the tongues pointed but softens them like fire.
@@ -1070,10 +1092,15 @@ internal sealed class NinjaGame : Panel
         return path;
     }
 
-    // A meteor shower around the word: tiny burning fragments that fly with it all
-    // the way down, each in its own spot beside or behind it and weaving a little.
-    // They share the word's fate: they blow up with it, or crash with it.
-    private IEnumerable<(float X, float Y, float Size)> Fragments(FallingWord falling)
+    // A small meteor in orbit: where it is, how big, which way it is heading (a unit
+    // vector) and whether it is on the near side of the word.
+    private readonly record struct Fragment(float X, float Y, float Size, float Dx, float Dy, bool Front);
+
+    // A swarm of small meteors circling the word as it falls, each on its own tilted
+    // oval at its own pace. On the near side they sweep from left to right, then
+    // loop round behind the word and come back. They fly with it all the way down
+    // and share its fate: they blow up with it, or crash with it.
+    private IEnumerable<Fragment> Fragments(FallingWord falling)
     {
         var radius = MeteorRadius(falling);
         var seed = falling.X * 0.37f;
@@ -1083,20 +1110,29 @@ internal sealed class NinjaGame : Panel
         {
             var hash = MathF.Abs(MathF.Sin(seed * 12.9898f + index * 78.233f)) * 43758.5453f % 1f;
             var hash2 = MathF.Abs(MathF.Sin(seed * 39.3468f + index * 11.135f)) * 24634.6345f % 1f;
-            var side = index % 2 == 0 ? -1 : 1;
-            var weave = time * (1.2f + hash) + index * 1.7f + seed;
-            // Scattered all round the head and along the trail, outside the head itself,
-            // each circling its spot so the swarm looks alive.
-            var x = falling.CentreX + side * radius * (1.25f + 1.6f * hash2) + MathF.Sin(weave) * 9;
-            var y = falling.CentreY - radius * (3.2f * hash - 0.7f) + MathF.Cos(weave * 0.8f) * 9;
-            yield return (x, y, 2f + 2.6f * hash);
+            var across = radius * (1.4f + 1.4f * hash2);
+            var depth = radius * (0.35f + 0.35f * hash);
+            var tilt = (hash - 0.5f) * 0.6f;
+            var lift = radius * (0.2f + 1.2f * hash2);
+            var spin = 1.1f + 0.9f * hash;
+            // The angle runs backwards so the near (lower) half moves left to right.
+            var angle = -time * spin + index * 2.399f + seed;
+            var cos = MathF.Cos(angle);
+            var sin = MathF.Sin(angle);
+            var x = falling.CentreX + cos * across;
+            var y = falling.CentreY - lift + sin * depth + cos * across * tilt;
+            var dx = sin * across;
+            var dy = -cos * depth + sin * across * tilt;
+            var speed = MathF.Max(0.001f, MathF.Sqrt(dx * dx + dy * dy));
+            var size = (2f + 2.6f * hash) * (sin > 0 ? 1 : 0.75f);
+            yield return new Fragment(x, y, size, dx / speed, dy / speed, sin > 0);
         }
     }
 
     // Every fragment of a meteor bursts in its own small blast.
     private void ExplodeFragments(FallingWord falling, bool ground)
     {
-        foreach (var (x, flyingY, size) in Fragments(falling))
+        foreach (var (x, flyingY, size, _, _, _) in Fragments(falling))
         {
             // On a crash they come down on the roof alongside the big one.
             var y = ground ? Sky.Bottom - RoofHeight : flyingY;
@@ -1144,16 +1180,21 @@ internal sealed class NinjaGame : Panel
     }
 
     // One small meteor: a white-hot head in a warm glow, trailing a thin yellow streak
-    // straight up that fades to orange and then to nothing.
-    private static void DrawFragment(Graphics graphics, float x, float y, float size, float length)
+    // straight up, like the big one's, whichever way it is flying round;
+    // the streak fades to orange and then to nothing.
+    private static void DrawFragment(Graphics graphics, Fragment fragment)
     {
+        var (x, y, size, _, _, _) = fragment;
+        var length = size * 9 + 16;
+        var backX = 0f;
+        var backY = -1f;
+        var back = MathF.Max(0.001f, MathF.Sqrt(backX * backX + backY * backY));
+        var tail = new PointF(x + backX / back * length, y + backY / back * length);
+        var normal = new PointF(-backY / back * size * 0.9f, backX / back * size * 0.9f);
         using (var streak = new GraphicsPath())
         {
-            streak.AddLine(x - size * 0.9f, y, x, y - length);
-            streak.AddLine(x, y - length, x + size * 0.9f, y);
-            streak.CloseFigure();
-            var bounds = new RectangleF(x - size, y - length - 1, size * 2, length + 2);
-            using var brush = new LinearGradientBrush(bounds, Color.White, Color.White, LinearGradientMode.Vertical)
+            streak.AddPolygon([new PointF(x - normal.X, y - normal.Y), tail, new PointF(x + normal.X, y + normal.Y)]);
+            using var brush = new LinearGradientBrush(tail, new PointF(x + backX / back * -1, y + backY / back * -1), Color.White, Color.White)
             {
                 InterpolationColors = new ColorBlend
                 {
