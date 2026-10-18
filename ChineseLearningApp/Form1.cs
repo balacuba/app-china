@@ -362,15 +362,8 @@ public sealed partial class Form1 : Form
     private void BuildInterface()
     {
         var practicePage = BuildPracticePage();
-        var tabs = new TabControl
-        {
-            Dock = DockStyle.Fill,
-            Font = new Font(UiFontName, 10.5F),
-            DrawMode = TabDrawMode.OwnerDrawFixed,
-            SizeMode = TabSizeMode.Fixed,
-            ItemSize = new Size(150, 42)
-        };
-        tabs.DrawItem += Tabs_DrawItem;
+        // Pages are switched from the ☰ menu button in the header.
+        var tabs = new PageHost { Dock = DockStyle.Fill, Font = new Font(UiFontName, 10.5F) };
         tabs.TabPages.Add(BuildVocabularyPage());
         tabs.TabPages.Add(BuildFlashcardPage());
         tabs.TabPages.Add(practicePage);
@@ -379,68 +372,71 @@ public sealed partial class Form1 : Form
         _tabs = tabs;
         _practicePage = practicePage;
         Controls.Add(tabs);
-        Controls.Add(BuildHeaderBar());
+        Controls.Add(BuildHeaderBar(tabs));
         tabs.BringToFront();
     }
 
-    // Accent-coloured app bar with the app name and a greeting.
-    private Panel BuildHeaderBar()
+    // Accent-coloured app bar: app name, the ☰ page menu and a greeting.
+    private Panel BuildHeaderBar(TabControl tabs)
     {
-        var header = new Panel { Dock = DockStyle.Top, Height = 56, BackColor = Accent, Padding = new Padding(20, 0, 20, 0) };
+        var header = new Panel { Dock = DockStyle.Top, Height = 60, BackColor = Accent, Padding = new Padding(20, 0, 20, 0) };
+        var row = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, BackColor = Accent };
+        // Equal side columns keep the app name centred in the bar.
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        row.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         var appName = new Label
         {
-            Dock = DockStyle.Left,
-            AutoSize = false,
-            Width = 420,
+            Anchor = AnchorStyles.None,
+            AutoSize = true,
             Text = "汉语  Học tiếng Trung",
             Font = new Font("Segoe UI Semibold", 15F),
             ForeColor = Color.White,
-            TextAlign = ContentAlignment.MiddleLeft
+            Margin = new Padding(24, 0, 24, 0)
         };
+
+        // White rounded button showing the current page; it opens the page menu.
+        var menuButton = new RoundedButton();
+        StyleButton(menuButton, ButtonKind.Secondary);
+        menuButton.BackColor = Color.White;
+        menuButton.FlatAppearance.MouseOverBackColor = AccentSoft;
+        menuButton.FlatAppearance.MouseDownBackColor = AccentSoftHover;
+        menuButton.FlatAppearance.BorderColor = Color.White;
+        menuButton.AutoSize = false;
+        menuButton.Size = new Size(230, 40);
+        menuButton.Anchor = AnchorStyles.Left;
+        menuButton.Margin = Padding.Empty;
+        string[] pageIcons = ["📚", "🃏", "⌨", "⚙"];
+        var pageLabels = tabs.TabPages.Cast<TabPage>()
+            .Select((page, index) => $"{pageIcons[index % pageIcons.Length]}  {page.Text}")
+            .ToList();
+        var checkPage = AttachRoundedMenu(menuButton, pageLabels, index => tabs.SelectedIndex = index);
+        void SyncMenuButton()
+        {
+            // SelectedTab is still null before the control has a handle.
+            var index = Math.Max(0, tabs.SelectedIndex);
+            menuButton.Text = $"☰   {tabs.TabPages[index].Text}   ▾";
+            checkPage(index);
+        }
+
+        tabs.SelectedIndexChanged += (_, _) => SyncMenuButton();
+        SyncMenuButton();
+
         var greeting = new Label
         {
-            Dock = DockStyle.Right,
-            AutoSize = false,
-            Width = 360,
-            Text = $"Xin chào, {_userName}",
+            Anchor = AnchorStyles.Right,
+            AutoSize = true,
+            Text = $"👋  Xin chào, {_userName}",
             Font = new Font(UiFontName, 11F),
             ForeColor = Color.FromArgb(219, 234, 254),
-            TextAlign = ContentAlignment.MiddleRight
+            Margin = Padding.Empty
         };
-        header.Controls.Add(appName);
-        header.Controls.Add(greeting);
+        row.Controls.Add(menuButton, 0, 0);
+        row.Controls.Add(appName, 1, 0);
+        row.Controls.Add(greeting, 2, 0);
+        header.Controls.Add(row);
         return header;
-    }
-
-    // Flat tabs: the selected one is white with accent text and an accent underline.
-    private static void Tabs_DrawItem(object? sender, DrawItemEventArgs e)
-    {
-        if (sender is not TabControl tabs)
-        {
-            return;
-        }
-
-        var selected = e.Index == tabs.SelectedIndex;
-        var bounds = e.Bounds;
-        using (var background = new SolidBrush(selected ? SurfaceColor : PageColor))
-        {
-            e.Graphics.FillRectangle(background, bounds);
-        }
-
-        if (selected)
-        {
-            using var underline = new SolidBrush(Accent);
-            e.Graphics.FillRectangle(underline, bounds.Left, bounds.Bottom - 3, bounds.Width, 3);
-        }
-
-        using var font = new Font(selected ? "Segoe UI Semibold" : UiFontName, 10.5F);
-        TextRenderer.DrawText(
-            e.Graphics,
-            tabs.TabPages[e.Index].Text,
-            font,
-            bounds,
-            selected ? Accent : MutedTextColor,
-            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
     }
 
     private TabPage BuildVocabularyPage()
@@ -621,15 +617,17 @@ public sealed partial class Form1 : Form
         var layout = new TableLayoutPanel
         {
             AutoScroll = true,
-            ColumnCount = 1,
+            ColumnCount = 2,
             Dock = DockStyle.Fill,
             Padding = new Padding(28),
-            RowCount = 3
+            RowCount = 2
         };
+        // Column checkboxes on the left, column order on the right.
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 420));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 250));
-        layout.Controls.Add(new Label
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        var intro = new Label
         {
             AutoSize = true,
             Dock = DockStyle.Fill,
@@ -637,7 +635,9 @@ public sealed partial class Form1 : Form
             ForeColor = MutedTextColor,
             Text = "Tích chọn cột muốn hiển thị trong danh sách từ vựng. Thay đổi được lưu tự động.",
             TextAlign = ContentAlignment.MiddleLeft
-        }, 0, 0);
+        };
+        layout.Controls.Add(intro, 0, 0);
+        layout.SetColumnSpan(intro, 2);
 
         var columnOptions = new FlowLayoutPanel
         {
@@ -649,7 +649,7 @@ public sealed partial class Form1 : Form
         };
         foreach (DataGridViewColumn column in _grid.Columns)
         {
-            var checkBox = new CheckBox
+            var checkBox = new RoundedCheckBox
             {
                 AutoSize = true,
                 Checked = column.Visible,
@@ -702,14 +702,54 @@ public sealed partial class Form1 : Form
         };
         var orderList = new ListBox
         {
-            BorderStyle = BorderStyle.FixedSingle,
+            BorderStyle = BorderStyle.None,
+            DrawMode = DrawMode.OwnerDrawFixed,
             Font = new Font(UiFontName, 10.5F),
+            ForeColor = BodyTextColor,
             FormattingEnabled = true,
             IntegralHeight = false,
-            ItemHeight = 24,
-            Location = new Point(0, 32),
-            Size = new Size(320, 260)
+            ItemHeight = 30,
+            Dock = DockStyle.Fill
         };
+        // Rows with a rounded accent pill for the selected column.
+        orderList.DrawItem += (_, e) =>
+        {
+            if (e.Index < 0)
+            {
+                return;
+            }
+
+            var graphics = e.Graphics;
+            using (var background = new SolidBrush(SurfaceColor))
+            {
+                graphics.FillRectangle(background, e.Bounds);
+            }
+
+            var selected = (e.State & DrawItemState.Selected) != 0;
+            if (selected)
+            {
+                var smoothing = graphics.SmoothingMode;
+                graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                var pill = new RectangleF(e.Bounds.Left + 2, e.Bounds.Top + 2, e.Bounds.Width - 4, e.Bounds.Height - 4);
+                using var path = RoundedMenuRenderer.CreateRoundedPath(pill, 8);
+                using var fill = new SolidBrush(AccentSoft);
+                graphics.FillPath(fill, path);
+                graphics.SmoothingMode = smoothing;
+            }
+
+            var text = orderList.GetItemText(orderList.Items[e.Index]);
+            using var font = new Font(orderList.Font, selected ? FontStyle.Bold : FontStyle.Regular);
+            TextRenderer.DrawText(graphics, $"{e.Index + 1}.  {text}", font,
+                new Rectangle(e.Bounds.Left + 12, e.Bounds.Top, e.Bounds.Width - 16, e.Bounds.Height),
+                selected ? Accent : BodyTextColor, TextFormatFlags.VerticalCenter | TextFormatFlags.Left);
+        };
+        var orderFrame = new RoundedPanel
+        {
+            Location = new Point(0, 34),
+            Size = new Size(320, 380),
+            Padding = new Padding(6)
+        };
+        orderFrame.Controls.Add(orderList);
         // Show the plain column title (Tag), without the filter marks in the header.
         orderList.Format += (_, e) =>
         {
@@ -722,15 +762,15 @@ public sealed partial class Form1 : Form
         var orderButtons = new FlowLayoutPanel
         {
             AutoSize = true,
-            Location = new Point(332, 32),
+            Location = new Point(332, 34),
             WrapContents = false
         };
         orderButtons.Controls.Add(CreateButton("Lên", (_, _) => MoveSelectedColumn(orderList, -1), secondary: true));
         orderButtons.Controls.Add(CreateButton("Xuống", (_, _) => MoveSelectedColumn(orderList, 1), secondary: true));
         orderPanel.Controls.Add(orderTitle);
-        orderPanel.Controls.Add(orderList);
+        orderPanel.Controls.Add(orderFrame);
         orderPanel.Controls.Add(orderButtons);
-        layout.Controls.Add(orderPanel, 0, 2);
+        layout.Controls.Add(orderPanel, 1, 1);
         page.Padding = new Padding(20);
         page.Controls.Add(CreateCard(layout, new Padding(8)));
         return page;
@@ -1224,55 +1264,15 @@ public sealed partial class Form1 : Form
         string[] practiceModes = ["Gõ từ vựng", "Gõ câu ví dụ"];
         var practiceModeBox = new RoundedButton();
         StyleButton(practiceModeBox, ButtonKind.Secondary);
-        var practiceModeMenu = new ContextMenuStrip
-        {
-            Font = new Font(UiFontName, 10.5F),
-            ShowImageMargin = false,
-            ShowCheckMargin = false,
-            DropShadowEnabled = false,
-            Padding = new Padding(4),
-            Renderer = new RoundedMenuRenderer()
-        };
-        // Rounded outline for the menu window itself.
-        practiceModeMenu.SizeChanged += (_, _) =>
-        {
-            using var path = RoundedMenuRenderer.CreateRoundedPath(
-                new RectangleF(0, 0, practiceModeMenu.Width, practiceModeMenu.Height), 10);
-            practiceModeMenu.Region = new Region(path);
-        };
+        Action<int>? checkPracticeMode = null;
         void SelectPracticeMode(int index)
         {
             practiceModeBox.Text = $"{practiceModes[index]}  ▾";
-            for (var i = 0; i < practiceModeMenu.Items.Count; i++)
-            {
-                ((ToolStripMenuItem)practiceModeMenu.Items[i]).Checked = i == index;
-            }
-
+            checkPracticeMode?.Invoke(index);
             SetPracticeExampleMode(index == 1);
         }
 
-        for (var i = 0; i < practiceModes.Length; i++)
-        {
-            var index = i;
-            practiceModeMenu.Items.Add(new ToolStripMenuItem(practiceModes[i], null, (_, _) => SelectPracticeMode(index))
-            {
-                AutoSize = false,
-                TextAlign = ContentAlignment.MiddleCenter
-            });
-        }
-
-        // The menu opens just below the button and matches its width.
-        practiceModeBox.Click += (_, _) =>
-        {
-            foreach (ToolStripItem item in practiceModeMenu.Items)
-            {
-                item.Size = new Size(practiceModeBox.Width - practiceModeMenu.Padding.Horizontal, 36);
-            }
-
-            practiceModeMenu.MinimumSize = new Size(practiceModeBox.Width, 0);
-            practiceModeMenu.MaximumSize = new Size(practiceModeBox.Width, 0);
-            practiceModeMenu.Show(practiceModeBox, new Point(0, practiceModeBox.Height + 4));
-        };
+        checkPracticeMode = AttachRoundedMenu(practiceModeBox, practiceModes, SelectPracticeMode);
         SelectPracticeMode(0);
         practiceActions.Controls.AddRange([continueStudyButton, _pausePracticeButton, _skipPracticeButton]);
         _practiceTimerLabel.Dock = DockStyle.Fill;
@@ -2681,7 +2681,14 @@ public sealed partial class Form1 : Form
             e.CellBounds.Top + (e.CellBounds.Height - size) / 2F,
             size,
             size);
-        var graphics = e.Graphics!;
+        DrawRoundedTickBox(e.Graphics!, box, isChecked);
+        e.Handled = true;
+    }
+
+    // A 20px rounded tick box: accent fill with a white tick when checked, a
+    // light outline when not. Shared by the grid and the settings checkboxes.
+    private static void DrawRoundedTickBox(Graphics graphics, RectangleF box, bool isChecked)
+    {
         var smoothing = graphics.SmoothingMode;
         graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
         using (var path = new System.Drawing.Drawing2D.GraphicsPath())
@@ -2719,7 +2726,6 @@ public sealed partial class Form1 : Form
         }
 
         graphics.SmoothingMode = smoothing;
-        e.Handled = true;
     }
 
     // Draws wrapped, horizontally centred text with highlighted segments in red.
@@ -2799,6 +2805,52 @@ public sealed partial class Form1 : Form
         }
 
         return (lines, lineHeight);
+    }
+
+    // A checkbox drawn with the same rounded tick box as the word list.
+    private sealed class RoundedCheckBox : CheckBox
+    {
+        public RoundedCheckBox()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+            Cursor = Cursors.Hand;
+        }
+
+        public override Size GetPreferredSize(Size proposedSize)
+        {
+            var text = TextRenderer.MeasureText(Text, Font);
+            return new Size(30 + text.Width, Math.Max(26, text.Height + 4));
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.Clear(Parent?.BackColor ?? SurfaceColor);
+            DrawRoundedTickBox(e.Graphics, new RectangleF(1, (Height - 20) / 2F, 20, 20), Checked);
+            TextRenderer.DrawText(e.Graphics, Text, Font, new Rectangle(30, 0, Width - 30, Height), ForeColor,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPadding);
+            if (Focused && ShowFocusCues)
+            {
+                ControlPaint.DrawFocusRectangle(e.Graphics, new Rectangle(28, 2, Width - 28, Height - 4));
+            }
+        }
+    }
+
+    // A TabControl without its tab strip or border: the pages fill the whole
+    // control at any size. Pages are switched from the ☰ header menu.
+    private sealed class PageHost : TabControl
+    {
+        private const int TCM_ADJUSTRECT = 0x1328;
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == TCM_ADJUSTRECT && !DesignMode)
+            {
+                m.Result = (IntPtr)1;
+                return;
+            }
+
+            base.WndProc(ref m);
+        }
     }
 
     // A panel drawn as an anti-aliased rounded rectangle with an outline and an
@@ -4468,6 +4520,56 @@ public sealed partial class Form1 : Form
         button.Padding = new Padding(14, 7, 14, 7);
         button.Cursor = Cursors.Hand;
         button.UseVisualStyleBackColor = false;
+    }
+
+    // A rounded dropdown that opens just below `owner` at the same width; picking an
+    // item calls onSelect. Returns a function that marks the current item.
+    private static Action<int> AttachRoundedMenu(Button owner, IReadOnlyList<string> labels, Action<int> onSelect)
+    {
+        var menu = new ContextMenuStrip
+        {
+            Font = new Font(UiFontName, 10.5F),
+            ShowImageMargin = false,
+            ShowCheckMargin = false,
+            DropShadowEnabled = false,
+            Padding = new Padding(4),
+            Renderer = new RoundedMenuRenderer()
+        };
+        // Rounded outline for the menu window itself.
+        menu.SizeChanged += (_, _) =>
+        {
+            using var path = RoundedMenuRenderer.CreateRoundedPath(new RectangleF(0, 0, menu.Width, menu.Height), 10);
+            menu.Region = new Region(path);
+        };
+        for (var i = 0; i < labels.Count; i++)
+        {
+            var index = i;
+            menu.Items.Add(new ToolStripMenuItem(labels[i], null, (_, _) => onSelect(index))
+            {
+                AutoSize = false,
+                TextAlign = ContentAlignment.MiddleCenter
+            });
+        }
+
+        owner.Click += (_, _) =>
+        {
+            foreach (ToolStripItem item in menu.Items)
+            {
+                item.Size = new Size(owner.Width - menu.Padding.Horizontal, 36);
+            }
+
+            menu.MinimumSize = new Size(owner.Width, 0);
+            menu.MaximumSize = new Size(owner.Width, 0);
+            menu.Show(owner, new Point(0, owner.Height + 4));
+        };
+        owner.Disposed += (_, _) => menu.Dispose();
+        return selected =>
+        {
+            for (var i = 0; i < menu.Items.Count; i++)
+            {
+                ((ToolStripMenuItem)menu.Items[i]).Checked = i == selected;
+            }
+        };
     }
 
     // A white panel with a 1px border, used to group content into cards.
