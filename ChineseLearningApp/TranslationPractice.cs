@@ -92,7 +92,18 @@ internal sealed class TranslationPractice : Panel
         _pinyin.Dock = DockStyle.Fill;
         _speakButton = Form1.CreateButton("🔊  Nghe", (_, _) => Speak(_chinese.Text), secondary: true);
         _pinyinButton = Form1.CreateButton("Hiện pinyin", (_, _) => { _showPinyin = !_showPinyin; ShowPinyin(); }, secondary: true);
-        var cardTools = new FlowLayoutPanel { AutoSize = true, WrapContents = false, BackColor = Form1.AccentSoft, Dock = DockStyle.Right };
+        // Fixed-size pills: left to size themselves they come out taller than the
+        // card's top row and lose their bottom edge.
+        foreach (var (button, width) in new[] { (_speakButton, 104), (_pinyinButton, 124) })
+        {
+            button.AutoSize = false;
+            button.Size = new Size(width, 34);
+            button.Padding = Padding.Empty;
+            button.Margin = new Padding(8, 2, 0, 0);
+            ((Form1.RoundedButton)button).Radius = 17;
+        }
+
+        var cardTools = new FlowLayoutPanel { AutoSize = true, WrapContents = false, BackColor = Form1.AccentSoft, Dock = DockStyle.Right, Margin = Padding.Empty };
         cardTools.Controls.AddRange([_speakButton, _pinyinButton]);
         var cardTop = new Panel { Dock = DockStyle.Fill, BackColor = Form1.AccentSoft };
         cardTop.Controls.Add(_topic);
@@ -222,10 +233,12 @@ internal sealed class TranslationPractice : Panel
         }
 
         var width = Math.Max(100, body.ClientSize.Width);
-        const TextFormatFlags flags = TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl;
-        var chineseHeight = TextRenderer.MeasureText(_chinese.Text, _chinese.Font, new Size(width, 0), flags).Height + 8;
+        // Ask each label how tall it needs to be at this width, so the measure matches
+        // how the label itself wraps (Chinese breaks between any two characters).
+        // The labels lose their cell margin, so measure 6px narrower to be safe.
+        var chineseHeight = _chinese.GetPreferredSize(new Size(width - 6, 0)).Height + 10;
         var pinyinHeight = _showPinyin && _pinyin.Text.Length > 0
-            ? TextRenderer.MeasureText(_pinyin.Text, _pinyin.Font, new Size(width, 0), flags).Height + 6
+            ? _pinyin.GetPreferredSize(new Size(width - 6, 0)).Height + 8
             : 0;
         body.RowStyles[1].Height = chineseHeight;
         body.RowStyles[2].Height = pinyinHeight;
