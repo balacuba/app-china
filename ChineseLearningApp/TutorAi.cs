@@ -22,21 +22,10 @@ internal sealed record AiProvider(
     Func<string, CancellationToken, Task<string?>> CheckKeyAsync,
     AiKeyStore Keys);
 
-// The AI behind the paragraph translation page. Claude is used when a Claude key
-// is saved (it is paid, so having one is a deliberate choice); otherwise Gemini,
-// which has a free tier.
+// The AI behind the paragraph translation page: Google Gemini, which has a free
+// tier, with the learner's own key.
 internal static class TutorAi
 {
-    public static readonly AiProvider Claude = new(
-        "Claude (Anthropic)",
-        "https://platform.claude.com/settings/keys",
-        "1. Bấm nút dưới đây để mở Claude Console, đăng nhập tài khoản Anthropic của bạn.\n" +
-        "2. Nạp credit (Claude API trả theo lượng dùng, không có gói miễn phí), rồi bấm “Create Key” và Copy.\n" +
-        "3. Xong! App tự nhận key vừa copy, kiểm tra và lưu lại.",
-        ClaudeAi.KeyShape,
-        ClaudeAi.CheckKeyAsync,
-        AiKeyStore.Claude);
-
     public static readonly AiProvider Gemini = new(
         "Gemini (Google)",
         "https://aistudio.google.com/app/apikey",
@@ -47,30 +36,11 @@ internal static class TutorAi
         GeminiAi.CheckKeyAsync,
         AiKeyStore.Gemini);
 
-    public static AiProvider Active => AiKeyStore.Claude.HasKey ? Claude : Gemini;
+    public static bool HasKey => AiKeyStore.Gemini.HasKey;
 
-    public static bool HasKey => AiKeyStore.Claude.HasKey || AiKeyStore.Gemini.HasKey;
-
-    // Short name for status lines, e.g. "⏳ Claude đang viết…".
-    public static string ShortName => Active == Claude ? "Claude" : "Gemini";
-
-    // Asks the active AI for a JSON object. Claude is held to `schema`; Gemini is
-    // asked for JSON and the prompt describes the fields.
-    public static Task<JsonElement> AskJsonAsync(
-        string system, string question, Dictionary<string, JsonElement> schema,
-        string working, IProgress<string> progress, CancellationToken cancellation) =>
-        Active == Claude
-            ? ClaudeAi.AskJsonAsync(system, question, schema, working, progress, cancellation)
-            : GeminiAi.AskJsonAsync(system, question, working, progress, cancellation);
-
-    // A JSON schema for an object whose fields are all required strings.
-    public static Dictionary<string, JsonElement> StringObject(params string[] fields) => new()
-    {
-        ["type"] = JsonSerializer.SerializeToElement("object"),
-        ["properties"] = JsonSerializer.SerializeToElement(fields.ToDictionary(field => field, _ => new { type = "string" })),
-        ["required"] = JsonSerializer.SerializeToElement(fields),
-        ["additionalProperties"] = JsonSerializer.SerializeToElement(false)
-    };
+    // Asks Gemini for a JSON object; the prompt describes the fields.
+    public static Task<JsonElement> AskJsonAsync(string system, string question, string working, IProgress<string> progress, CancellationToken cancellation) =>
+        GeminiAi.AskJsonAsync(system, question, working, progress, cancellation);
 
     public static string Text(this JsonElement element, string name) =>
         element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value)
@@ -82,7 +52,6 @@ internal static class TutorAi
 // it can only be read back by the same Windows user.
 internal sealed class AiKeyStore(string fileName)
 {
-    public static readonly AiKeyStore Claude = new("claude-key.bin");
     public static readonly AiKeyStore Gemini = new("gemini-key.bin");
 
     private readonly string _path = Path.Combine(

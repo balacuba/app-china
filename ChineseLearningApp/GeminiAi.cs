@@ -53,7 +53,7 @@ internal static partial class GeminiAi
         var key = AiKeyStore.Gemini.Load();
         if (key.Length == 0)
         {
-            throw new AiException("Hãy nhập API key Gemini trước (nút 🔑 API key).", needsKey: true);
+            throw new AiException("Hãy nhập API key Gemini trước (nút 🔑).", needsKey: true);
         }
 
         Exception? last = null;
@@ -157,7 +157,7 @@ internal static partial class GeminiAi
 
         if (body.Contains("API_KEY_INVALID", StringComparison.Ordinal) || status is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
         {
-            return new AiException("API key Gemini không hợp lệ hoặc không có quyền. Hãy kiểm tra lại key (nút 🔑 API key).", needsKey: true);
+            return new AiException("API key Gemini không hợp lệ hoặc không có quyền. Hãy kiểm tra lại key (nút 🔑).", needsKey: true);
         }
 
         if (status == HttpStatusCode.TooManyRequests || reason == "RESOURCE_EXHAUSTED")

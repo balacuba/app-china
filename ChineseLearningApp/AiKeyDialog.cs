@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace ChineseLearningApp;
 
-// Getting the learner's API key for an AI service (Claude or Gemini) with as
+// Getting the learner's API key for an AI service (Gemini) with as
 // little effort as possible: one button opens the service's key page in the
 // browser, where they sign in to their own account and create and copy a key.
 // While this box is open it watches the clipboard, so a copied key is picked up,
