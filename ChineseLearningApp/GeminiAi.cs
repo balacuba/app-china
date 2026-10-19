@@ -97,7 +97,8 @@ internal static partial class GeminiAi
         {
             systemInstruction = new { parts = new[] { new { text = system } } },
             contents = new[] { new { role = "user", parts = new[] { new { text = question } } } },
-            generationConfig = new { responseMimeType = "application/json", temperature = 1.0 }
+            // A little below the default: still varied, but steadier and more coherent.
+            generationConfig = new { responseMimeType = "application/json", temperature = 0.7 }
         });
         using var request = new HttpRequestMessage(HttpMethod.Post, Endpoint)
         {

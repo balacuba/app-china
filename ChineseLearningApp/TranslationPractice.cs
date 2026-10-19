@@ -306,12 +306,18 @@ internal sealed class TranslationPractice : Panel
         _busy?.Cancel();
         _busy = new CancellationTokenSource();
         SetBusy(true, "⏳ Gemini đang viết đoạn văn…");
-        var words = StudyWords().Where(word => word.Length > 0).OrderBy(_ => Random.Shared.Next()).Take(12).ToList();
+        // A couple of the learner's words are only offered, never required: forcing
+        // them in (老师, 你好, 不客气 in a paragraph about the weather) made the
+        // paragraphs stray into greetings and stop making sense.
+        var words = StudyWords().Where(word => word.Length > 0).OrderBy(_ => Random.Shared.Next()).Take(2).ToList();
         var topic = Topics[Random.Shared.Next(Topics.Length)];
         var question =
             $"Viết một đoạn văn tiếng Trung giản thể {Lengths[_length].Size}, " +
             $"chỉ dùng từ vựng và ngữ pháp ở trình độ HSK {_level}{(_level >= 7 ? " (bậc cao cấp 7–9 của chuẩn HSK 3.0)" : string.Empty)}, về chủ đề \"{topic}\". Không cần đếm chữ. " +
-            (words.Count > 0 ? $"Nếu hợp lý, hãy dùng vài từ sau mà học viên đang học: {string.Join("、", words)}. " : string.Empty) +
+            "Đoạn văn kể một tình huống cụ thể, liền mạch, có nhân vật và sự việc rõ ràng (ví dụ: ai, ở đâu, làm gì, vì sao), " +
+            "các câu nối tiếp nhau hợp lý như một bài đọc trong giáo trình. Mọi câu đều phải nói về chủ đề; " +
+            "không chào hỏi, không cảm ơn, không nói chuyện với người đọc, không chèn câu lạc đề. " +
+            (words.Count > 0 ? $"Chỉ khi thật sự hợp với tình huống thì mới dùng từ sau, nếu không hợp thì bỏ qua: {string.Join("、", words)}. " : string.Empty) +
             "Trả về JSON: {\"topic\": \"tên chủ đề bằng tiếng Việt\", \"chinese\": \"đoạn văn chữ Hán\", " +
             "\"pinyin\": \"pinyin có dấu thanh của cả đoạn\", \"vietnamese\": \"bản dịch tiếng Việt tự nhiên, sát nghĩa\"}";
         try
