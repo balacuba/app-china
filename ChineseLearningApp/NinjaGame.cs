@@ -44,10 +44,10 @@ internal sealed class NinjaGame : Panel
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 15 };
     // Pause after typing before it is checked. When the text could still grow into
     // another falling word (你 → 你好, ni → nihao), the shorter word is only shot
-    // once the learner has typed nothing for 0.9 seconds in all: this pause plus the
+    // once the learner has typed nothing for 0.2 seconds in all: this pause plus the
     // longer one that follows it.
-    private const int AutoHitDelay = 300;
-    private const int PrefixHitDelay = 900 - AutoHitDelay;
+    private const int AutoHitDelay = 150;
+    private const int PrefixHitDelay = 200 - AutoHitDelay;
 
     private readonly System.Windows.Forms.Timer _autoHit = new() { Interval = AutoHitDelay };
     private readonly Stopwatch _clock = new();
