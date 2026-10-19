@@ -2371,7 +2371,7 @@ public sealed partial class Form1 : Form
         return page;
     }
 
-    // Paragraph translation: the free AI writes short paragraphs (using words being
+    // Paragraph translation: Google Gemini writes short paragraphs (using words being
     // studied when it can) and marks the learner's Vietnamese translation.
     private TabPage BuildTranslationPage()
     {

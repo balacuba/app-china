@@ -2,10 +2,10 @@ using System.Text.Json;
 
 namespace ChineseLearningApp;
 
-// Paragraph translation practice. The free AI writes a short Chinese paragraph at
-// the chosen HSK level (using some of the words being studied when it can), the
-// learner types a Vietnamese translation, and the AI marks it out of 10 with
-// comments, corrections and a model translation.
+// Paragraph translation practice. Google Gemini (with the learner's own free API
+// key) writes a short Chinese paragraph at the chosen HSK level (using some of the
+// words being studied when it can), the learner types a Vietnamese translation,
+// and Gemini marks it out of 10 with comments, corrections and a model translation.
 internal sealed class TranslationPractice : Panel
 {
     private const string TeacherRole =
@@ -75,6 +75,9 @@ internal sealed class TranslationPractice : Panel
         choices.Controls.Add(Caption("Độ dài", 18));
         choices.Controls.AddRange(_lengthButtons);
         choices.Controls.Add(_newButton);
+        var keyButton = Form1.CreateButton("🔑  API key", (_, _) => AskForKey(), secondary: true);
+        keyButton.Margin = new Padding(10, 0, 0, 0);
+        choices.Controls.Add(keyButton);
 
         // The paragraph, on a soft blue card, with listen / pinyin buttons.
         _topic.AutoSize = true;
@@ -174,7 +177,7 @@ internal sealed class TranslationPractice : Panel
 
         ShowChoices();
         ShowPinyin();
-        SetBusy(false);
+        SetBusy(false, GeminiAi.HasKey ? string.Empty : "Cần API key Gemini miễn phí: bấm “🔑 API key” để nhập.");
     }
 
     private static Label Caption(string text, int left = 0, int top = 9) => new()
@@ -269,6 +272,16 @@ internal sealed class TranslationPractice : Panel
         Relayout();
     }
 
+    // Opens the API key box; once a key is saved the hint about it goes away.
+    private void AskForKey()
+    {
+        using var dialog = new GeminiKeyDialog();
+        if (dialog.ShowDialog(FindForm()) == DialogResult.OK)
+        {
+            _status.Text = GeminiAi.HasKey ? "✅ Đã lưu API key. Bấm “Đoạn văn mới” để bắt đầu." : "Đã xóa API key.";
+        }
+    }
+
     private void SetBusy(bool busy, string status = "")
     {
         _newButton.Enabled = !busy;
@@ -284,7 +297,7 @@ internal sealed class TranslationPractice : Panel
     {
         _busy?.Cancel();
         _busy = new CancellationTokenSource();
-        SetBusy(true, "⏳ AI đang viết đoạn văn…");
+        SetBusy(true, "⏳ Gemini đang viết đoạn văn…");
         var words = StudyWords().Where(word => word.Length > 0).OrderBy(_ => Random.Shared.Next()).Take(12).ToList();
         var topic = Topics[Random.Shared.Next(Topics.Length)];
         var question =
@@ -295,11 +308,11 @@ internal sealed class TranslationPractice : Panel
             "\"pinyin\": \"pinyin có dấu thanh của cả đoạn\", \"vietnamese\": \"bản dịch tiếng Việt tự nhiên, sát nghĩa\"}";
         try
         {
-            var answer = await FreeAi.AskJsonAsync(TeacherRole, question, "⏳ AI đang viết đoạn văn…", new Progress<string>(text => _status.Text = text), _busy.Token);
+            var answer = await GeminiAi.AskJsonAsync(TeacherRole, question, "⏳ Gemini đang viết đoạn văn…", new Progress<string>(text => _status.Text = text), _busy.Token);
             var chinese = answer.Text("chinese").Trim();
             if (chinese.Length == 0)
             {
-                throw new FreeAiException("AI chưa viết được đoạn văn. Hãy thử lại.");
+                throw new AiException("AI chưa viết được đoạn văn. Hãy thử lại.");
             }
 
             _reference = answer.Text("vietnamese").Trim();
@@ -312,9 +325,13 @@ internal sealed class TranslationPractice : Panel
             SetBusy(false);
             _translation.Focus();
         }
-        catch (FreeAiException ex)
+        catch (AiException ex)
         {
             SetBusy(false, "⚠ " + ex.Message);
+            if (ex.NeedsKey)
+            {
+                AskForKey();
+            }
         }
         catch (OperationCanceledException)
         {
@@ -338,7 +355,7 @@ internal sealed class TranslationPractice : Panel
 
         _busy?.Cancel();
         _busy = new CancellationTokenSource();
-        SetBusy(true, "⏳ AI đang chấm bài…");
+        SetBusy(true, "⏳ Gemini đang chấm bài…");
         var question =
             $"Đoạn văn tiếng Trung: {_chinese.Text}\n" +
             $"Bản dịch tham khảo: {_reference}\n" +
@@ -350,13 +367,17 @@ internal sealed class TranslationPractice : Panel
             "\"better_translation\": \"bản dịch hoàn chỉnh, sửa lại từ bản của học viên\"}";
         try
         {
-            var answer = await FreeAi.AskJsonAsync(TeacherRole, question, "⏳ AI đang chấm bài…", new Progress<string>(text => _status.Text = text), _busy.Token);
+            var answer = await GeminiAi.AskJsonAsync(TeacherRole, question, "⏳ Gemini đang chấm bài…", new Progress<string>(text => _status.Text = text), _busy.Token);
             ShowGrade(answer);
             SetBusy(false);
         }
-        catch (FreeAiException ex)
+        catch (AiException ex)
         {
             SetBusy(false, "⚠ " + ex.Message);
+            if (ex.NeedsKey)
+            {
+                AskForKey();
+            }
         }
         catch (OperationCanceledException)
         {
