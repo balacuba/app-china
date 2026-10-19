@@ -16,10 +16,11 @@ internal enum NinjaGameMode
 }
 
 // "Mèo bắn bong bóng": words float down through a night sky inside soap bubbles.
-// Typing a word marks it; the cat on the roof runs under it and fires a beam
-// from its mouth that pops the bubble (+10 × combo). A word that lands on the roof costs one of three lives. Every
-// 8 hits is a new level: faster and more words. Answers are always the Chinese
-// characters; when only characters are shown, their pinyin (no tones) counts too.
+// Typing a word marks it; the cat on the roof runs under it and throws a ball of yarn
+// that pops the bubble (+10 × combo). A word that lands on the roof costs one of
+// three lives. Every 8 hits is a new level: faster and more words. Answers are
+// always the Chinese characters; when only characters are shown, their pinyin
+// (no tones) counts too.
 internal sealed class NinjaGame : Panel
 {
     private const int MaxLives = 3;
@@ -78,9 +79,9 @@ internal sealed class NinjaGame : Panel
     private bool _prefixWaited;
     private string _composition = string.Empty;
 
-    // The cat on the roof and the beams in flight.
+    // The cat on the roof and the balls of yarn in flight.
     private readonly Queue<FallingWord> _targets = new();
-    private readonly List<Beam> _beams = [];
+    private readonly List<Ball> _balls = [];
     private FallingWord? _aiming;
     private float _ninjaX = 200;
     private float _wanderTo = 200;
@@ -88,6 +89,12 @@ internal sealed class NinjaGame : Panel
     private bool _ninjaRunning;
     private double _runPhase;
     private double _throwPose;
+    private double _hop;
+    private double _hopSpeed;
+    private double _squash;
+    private double _nextIdleHop;
+    private double _love;
+    private PointF _yarnAt;
 
     // Words to play with (read each time a word drops in, so the list can change).
     public Func<IReadOnlyList<GameWord>> Words { get; set; } = () => [];
@@ -325,7 +332,7 @@ internal sealed class NinjaGame : Panel
         _explosions.Clear();
         _floats.Clear();
         _targets.Clear();
-        _beams.Clear();
+        _balls.Clear();
         _aiming = null;
         _score = 0;
         _combo = 0;
@@ -335,6 +342,8 @@ internal sealed class NinjaGame : Panel
         _gameOver = false;
         _spawnIn = 0.3;
         _ninjaX = _wanderTo = Width / 2f;
+        _hop = _hopSpeed = _squash = _love = 0;
+        _yarnAt = new PointF(_ninjaX, Height - RoofHeight - 30);
         ShowMenu(false);
         _input.Clear();
         _running = true;
@@ -384,7 +393,7 @@ internal sealed class NinjaGame : Panel
         _explosions.Clear();
         _floats.Clear();
         _targets.Clear();
-        _beams.Clear();
+        _balls.Clear();
         _aiming = null;
         _gameOver = false;
         _startButton.Text = "▶  Bắt đầu chơi";
@@ -424,12 +433,12 @@ internal sealed class NinjaGame : Panel
         var speed = roofTop / FallSeconds * (34 + Level * 10) / 44;
         for (var index = _words.Count - 1; index >= 0; index--)
         {
-            // Answered words keep falling too; the beam homes in on them as they go.
+            // Answered words keep falling too; the ball homes in on them as they go.
             var falling = _words[index];
             falling.Y += (float)(speed * dt);
             if (falling.CentreY + BubbleRadii(falling).Height >= roofTop && falling.Targeted)
             {
-                // Answered, but the beam is still on its way: the answer was right,
+                // Answered, but the ball is still on its way: the answer was right,
                 // so it blows up here as a hit rather than costing a life.
                 if (_aiming == falling)
                 {
@@ -458,7 +467,8 @@ internal sealed class NinjaGame : Panel
         }
 
         UpdateNinja(dt, sky);
-        UpdateBeams(dt);
+        UpdateHops(dt);
+        UpdateBalls(dt);
         foreach (var particle in _particles)
         {
             particle.X += particle.Vx * (float)dt;
@@ -779,7 +789,7 @@ internal sealed class NinjaGame : Panel
         Invalidate();
     }
 
-    // A beam reached its bubble: pop, points, and the word counts as right.
+    // A ball reached its bubble: pop, points, and the word counts as right.
     private void HitWord(FallingWord target)
     {
         _words.Remove(target);
@@ -790,6 +800,7 @@ internal sealed class NinjaGame : Panel
         _score += points;
         var centre = new PointF(target.CentreX, target.CentreY);
         Pop(centre.X, centre.Y, BubbleRadii(target), ground: false);
+        _love = 0.9;
 
         _floats.Add(new FloatingText(_combo > 1 ? $"+{points}  ✨x{_combo}" : $"+{points}", centre.X, centre.Y, Color.FromArgb(253, 224, 71)));
         if (_hits % HitsPerLevel == 0)
@@ -849,26 +860,26 @@ internal sealed class NinjaGame : Panel
         {
             _facing = Math.Sign(_aiming.CentreX - _ninjaX) is var side and not 0 ? side : _facing;
             _ninjaRunning = false;
-            var mouth = Mouth(sky);
-            _beams.Add(new Beam(mouth.X, mouth.Y, _aiming));
+            _balls.Add(new Ball(_yarnAt.X, _yarnAt.Y, _aiming));
+            _hopSpeed = Math.Max(_hopSpeed, 340);
             _aiming = null;
-            _throwPose = 0.25;
+            _throwPose = 0.3;
         }
     }
-
-    // Beams home in on their bubble; one that lost its bubble flies off the top.
-    private void UpdateBeams(double dt)
+    // Balls of yarn spin and home in on their bubble; one that lost its bubble flies off the top.
+    private void UpdateBalls(double dt)
     {
-        const float speed = 1400;
-        for (var index = _beams.Count - 1; index >= 0; index--)
+        const float speed = 1000;
+        for (var index = _balls.Count - 1; index >= 0; index--)
         {
-            var beam = _beams[index];
+            var ball = _balls[index];
+            ball.Spin += (float)(dt * 720);
             float dx;
             float dy;
-            if (_words.Contains(beam.Target))
+            if (_words.Contains(ball.Target))
             {
-                dx = beam.Target.CentreX - beam.X;
-                dy = beam.Target.CentreY - beam.Y;
+                dx = ball.Target.CentreX - ball.X;
+                dy = ball.Target.CentreY - ball.Y;
             }
             else
             {
@@ -877,21 +888,21 @@ internal sealed class NinjaGame : Panel
             }
 
             var length = MathF.Max(0.001f, MathF.Sqrt(dx * dx + dy * dy));
-            // The bubble pops the moment the beam reaches its film.
-            if (_words.Contains(beam.Target) && length < HitRadius(beam.Target))
+            // The bubble pops the moment the ball reaches its film.
+            if (_words.Contains(ball.Target) && length < HitRadius(ball.Target))
             {
-                _beams.RemoveAt(index);
-                HitWord(beam.Target);
+                _balls.RemoveAt(index);
+                HitWord(ball.Target);
                 continue;
             }
 
-            beam.Dx = dx / length;
-            beam.Dy = dy / length;
-            beam.X += beam.Dx * speed * (float)dt;
-            beam.Y += beam.Dy * speed * (float)dt;
-            if (beam.Y < -40)
+            ball.Dx = dx / length;
+            ball.Dy = dy / length;
+            ball.X += ball.Dx * speed * (float)dt;
+            ball.Y += ball.Dy * speed * (float)dt;
+            if (ball.Y < -40)
             {
-                _beams.RemoveAt(index);
+                _balls.RemoveAt(index);
             }
         }
     }
@@ -975,9 +986,9 @@ internal sealed class NinjaGame : Panel
                 DrawWord(graphics, falling);
             }
 
-            foreach (var beam in _beams)
+            foreach (var ball in _balls)
             {
-                DrawBeam(graphics, beam);
+                DrawBall(graphics, ball);
             }
 
             DrawRoof(graphics, sky);
@@ -1072,7 +1083,7 @@ internal sealed class NinjaGame : Panel
     }
 
     // Plain glowing text, no frame: characters, characters over pinyin, or pinyin.
-    // A word already answered turns gold while the beam is on its way.
+    // A word already answered turns gold while the ball is on its way.
     private void DrawWord(Graphics graphics, FallingWord falling)
     {
         // The part typed so far turns red: leading characters, or the matching pinyin.
@@ -1274,7 +1285,7 @@ internal sealed class NinjaGame : Panel
         return new SizeF(Math.Max(across, down * 0.92f), down);
     }
 
-    // How close the beam must get to pop the bubble.
+    // How close the ball must get to pop the bubble.
     private static float HitRadius(FallingWord falling)
     {
         var radii = BubbleRadii(falling);
@@ -1362,7 +1373,7 @@ internal sealed class NinjaGame : Panel
         return image;
     }
 
-    // A word's bubble, with a sparkle running round its rim. A bubble the beam is
+    // A word's bubble, with a sparkle running round its rim. A bubble the ball is
     // on its way to glows pink.
     private void DrawBubble(Graphics graphics, FallingWord falling)
     {
@@ -1459,97 +1470,111 @@ internal sealed class NinjaGame : Panel
         }
     }
 
-    // Where the beam leaves the cat: its mouth.
-    private PointF Mouth(RectangleF sky) => new(_ninjaX, sky.Bottom - RoofHeight + 4 - CatBodyHeight - CatHeadSize * 0.26f);
+    private const float CatSize = 84;
+    private const float YarnRadius = 9;
 
-    private const float CatHeadSize = 58;
-    private const float CatBodyHeight = 32;
-
-    // A ginger cat on the roof: round head, cream belly, swishing tail. Its paws
-    // patter and it bobs while it runs; it opens its mouth wide to fire, and looks
-    // sad for a moment when a bubble lands.
-    private void DrawCat(Graphics graphics, float x, float feetY)
+    // The cat bounces along: little hops while it runs, a bigger jump to throw,
+    // the odd hop while it waits, and a squash each time it lands.
+    private void UpdateHops(double dt)
     {
-        var bob = _ninjaRunning ? Math.Abs((float)Math.Sin(_runPhase)) * 3 : (float)Math.Sin(_twinkle * 2.4) * 0.8f;
-        var swing = _ninjaRunning ? (float)Math.Sin(_runPhase) * 3 : 0;
-        using (var shadow = new SolidBrush(Color.FromArgb(70, 0, 0, 0)))
+        if (_hop <= 0 && _hopSpeed <= 0)
         {
-            graphics.FillEllipse(shadow, x - 26, feetY - 4, 52, 8);
-        }
-
-        // Tail on the side away from where it is going, swishing.
-        var tailSide = -_facing;
-        var swish = (float)Math.Sin(_twinkle * 3) * 8;
-        using (var tailEdge = new Pen(CatArt.Ink, 9) { StartCap = LineCap.Round, EndCap = LineCap.Round })
-        using (var tail = new Pen(CatArt.Ginger, 6) { StartCap = LineCap.Round, EndCap = LineCap.Round })
-        using (var curve = new GraphicsPath())
-        {
-            curve.AddBezier(
-                x + tailSide * 16, feetY - 10 - bob,
-                x + tailSide * 38, feetY - 6,
-                x + tailSide * 38, feetY - 40 + swish,
-                x + tailSide * 28 + swish * 0.4f, feetY - 52 + swish * 0.5f);
-            graphics.DrawPath(tailEdge, curve);
-            graphics.DrawPath(tail, curve);
-        }
-
-        var body = new RectangleF(x - 22, feetY - CatBodyHeight - 4 - bob, 44, CatBodyHeight + 4);
-        using (var fur = new SolidBrush(CatArt.Ginger))
-        using (var outline = new Pen(CatArt.Ink, 2))
-        using (var cream = new SolidBrush(CatArt.Cream))
-        {
-            graphics.FillEllipse(fur, body);
-            graphics.DrawEllipse(outline, body);
-            graphics.FillEllipse(cream, x - 12, body.Y + 9, 24, body.Height - 12);
-            foreach (var side in new[] { -1, 1 })
+            if (_ninjaRunning)
             {
-                var paw = new RectangleF(x + side * 11 - 7, feetY - 8 + side * swing, 14, 9);
-                graphics.FillEllipse(cream, paw);
-                graphics.DrawEllipse(outline, paw);
+                _hopSpeed = 210;
+            }
+            else if (_twinkle >= _nextIdleHop)
+            {
+                _hopSpeed = 190;
+                _nextIdleHop = _twinkle + 1.8 + _random.NextDouble() * 2.5;
             }
         }
 
-        var mood = _throwPose > 0 ? CatArt.Mood.Surprised : _flash > 0 ? CatArt.Mood.Sad : CatArt.Mood.Happy;
-        var head = new RectangleF(x - CatHeadSize / 2, feetY - CatBodyHeight - bob - CatHeadSize * 0.88f, CatHeadSize, CatHeadSize);
-        CatArt.DrawCatHead(graphics, head, CatArt.Ginger, mood);
-
-        // A pink glow in the open mouth just as it fires.
-        if (_throwPose > 0)
+        _hopSpeed -= 1500 * dt;
+        _hop += _hopSpeed * dt;
+        if (_hop <= 0)
         {
-            var glow = (float)(_throwPose / 0.25);
-            var mouth = new PointF(x, head.Y + CatHeadSize * 0.74f);
-            using var halo = new SolidBrush(Color.FromArgb((int)(150 * glow), 255, 120, 200));
-            graphics.FillEllipse(halo, mouth.X - 12, mouth.Y - 12, 24, 24);
-            using var core = new SolidBrush(Color.FromArgb((int)(255 * glow), 255, 240, 250));
-            graphics.FillEllipse(core, mouth.X - 4, mouth.Y - 4, 8, 8);
+            if (_hopSpeed < -80)
+            {
+                _squash = 1;
+            }
+
+            _hop = 0;
+            _hopSpeed = 0;
+        }
+
+        _squash = Math.Max(0, _squash - dt * 5);
+        _love = Math.Max(0, _love - dt);
+    }
+
+    // The white mochi cat on the roof. It hugs a ball of yarn while it runs and
+    // hops about; to throw, it jumps and flings a paw up. It beams with hearts
+    // after a pop and looks sad for a moment when a bubble lands.
+    private void DrawCat(Graphics graphics, float x, float feetY)
+    {
+        var throwing = _throwPose > 0;
+        var lift = (float)_hop;
+        using (var shadow = new SolidBrush(Color.FromArgb(Math.Max(20, 70 - (int)lift), 0, 0, 0)))
+        {
+            var width = 50 - Math.Min(20, lift * 0.3f);
+            graphics.FillEllipse(shadow, x - width / 2, feetY - 4, width, 8);
+        }
+
+        var squash = (float)_squash;
+        var airborne = lift > 0;
+        var pose = new CatArt.Pose
+        {
+            Time = (float)_twinkle,
+            Hop = lift / CatSize,
+            SquashX = 1 + 0.14f * squash - (airborne ? 0.04f : 0),
+            SquashY = 1 - 0.16f * squash + (airborne ? 0.06f : 0),
+            Lean = _ninjaRunning ? _facing * 8 : 0,
+            Running = _ninjaRunning,
+            Step = (float)Math.Sin(_runPhase),
+            TailSide = -_facing,
+            Hearts = _love > 0,
+            Sticker = 0.03f
+        };
+        if (throwing)
+        {
+            pose.RaiseArm = _facing;
+            pose.ArmAngle = 20 + 50 * (1 - (float)(_throwPose / 0.3));
+        }
+        else
+        {
+            pose.Hold = (canvas, area) => CatArt.DrawYarn(canvas, area.X + area.Width / 2, area.Y + area.Height / 2,
+                YarnRadius, (float)(_twinkle * 40));
+        }
+
+        var mood = throwing || _love > 0 ? CatArt.Mood.Happy : _flash > 0 ? CatArt.Mood.Sad : CatArt.Mood.Smile;
+        var belly = CatArt.DrawCat(graphics, new RectangleF(x - CatSize / 2, feetY - CatSize, CatSize, CatSize), CatArt.Coat.White, mood, pose);
+        if (!throwing)
+        {
+            _yarnAt = belly;
         }
     }
 
-    // The beam from the cat's mouth: a pink ray with a white-hot core racing to
-    // its bubble, a bright spark at its head.
-    private static void DrawBeam(Graphics graphics, Beam beam)
+    // A thrown ball of yarn, spinning as it flies, with its loose end of thread
+    // trailing in a wavy line behind it.
+    private void DrawBall(Graphics graphics, Ball ball)
     {
-        var travelled = MathF.Sqrt((beam.X - beam.StartX) * (beam.X - beam.StartX) + (beam.Y - beam.StartY) * (beam.Y - beam.StartY));
-        var length = Math.Min(170, travelled);
-        var tail = new PointF(beam.X - beam.Dx * length, beam.Y - beam.Dy * length);
-        var head = new PointF(beam.X, beam.Y);
-        if (length > 1)
+        var travelled = MathF.Sqrt((ball.X - ball.StartX) * (ball.X - ball.StartX) + (ball.Y - ball.StartY) * (ball.Y - ball.StartY));
+        var length = Math.Min(70, travelled);
+        if (length > 4)
         {
-            using var glowFade = new LinearGradientBrush(tail, head, Color.FromArgb(0, 255, 120, 200), Color.FromArgb(90, 255, 120, 200));
-            using var glow = new Pen(glowFade, 12) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-            graphics.DrawLine(glow, tail, head);
-            using var rayFade = new LinearGradientBrush(tail, head, Color.FromArgb(0, 255, 110, 190), Color.FromArgb(230, 255, 110, 190));
-            using var ray = new Pen(rayFade, 5) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-            graphics.DrawLine(ray, tail, head);
-            using var coreFade = new LinearGradientBrush(tail, head, Color.FromArgb(0, 255, 255, 255), Color.White);
-            using var core = new Pen(coreFade, 2) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-            graphics.DrawLine(core, tail, head);
+            var points = new PointF[9];
+            for (var index = 0; index < points.Length; index++)
+            {
+                var along = length * index / (points.Length - 1);
+                var wave = MathF.Sin(index * 1.3f + (float)_twinkle * 18) * 4 * index / (points.Length - 1);
+                points[index] = new PointF(ball.X - ball.Dx * along - ball.Dy * wave, ball.Y - ball.Dy * along + ball.Dx * wave);
+            }
+
+            using var thread = new Pen(Color.FromArgb(220, 255, 170, 205), 2) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            graphics.DrawCurve(thread, points);
         }
 
-        using var spark = new SolidBrush(Color.FromArgb(120, 255, 160, 220));
-        graphics.FillEllipse(spark, beam.X - 9, beam.Y - 9, 18, 18);
-        using var white = new SolidBrush(Color.White);
-        graphics.FillEllipse(white, beam.X - 4, beam.Y - 4, 8, 8);
+        CatArt.DrawYarn(graphics, ball.X, ball.Y, YarnRadius * 1.15f, ball.Spin);
     }
 
     private void DrawHud(Graphics graphics, RectangleF sky)
@@ -1628,8 +1653,8 @@ internal sealed class NinjaGame : Panel
         {
             title = "🐱 Mèo bắn bong bóng";
             detail = BestScore > 0
-                ? $"Gõ chữ Hán hoặc pinyin không dấu của chữ trong bong bóng để mèo bắn tia làm vỡ bóng. Cao nhất: {BestScore}"
-                : "Gõ chữ Hán hoặc pinyin không dấu của chữ trong bong bóng để mèo bắn tia làm vỡ bóng trước khi bóng chạm mái nhà!";
+                ? $"Gõ chữ Hán hoặc pinyin không dấu của chữ trong bong bóng để mèo ném cuộn len làm vỡ bóng. Cao nhất: {BestScore}"
+                : "Gõ chữ Hán hoặc pinyin không dấu của chữ trong bong bóng để mèo ném cuộn len làm vỡ bóng trước khi bóng chạm mái nhà!";
         }
 
         var centreY = (int)(sky.Height / 2);
@@ -1648,7 +1673,7 @@ internal sealed class NinjaGame : Panel
         public SizeF Size { get; } = size;
         public Color Color { get; } = color;
 
-        // Answered: it stops falling and waits for the beam.
+        // Answered: it stops falling and waits for the ball.
         public bool Targeted { get; set; }
 
         // The drawn word and what it shows (typed lengths, answered), made on demand.
@@ -1659,7 +1684,7 @@ internal sealed class NinjaGame : Panel
         public float CentreY => Y + Size.Height / 2;
     }
 
-    private sealed class Beam(float x, float y, FallingWord target)
+    private sealed class Ball(float x, float y, FallingWord target)
     {
         public float X { get; set; } = x;
         public float Y { get; set; } = y;
@@ -1667,6 +1692,7 @@ internal sealed class NinjaGame : Panel
         public float Dy { get; set; } = -1;
         public float StartX { get; } = x;
         public float StartY { get; } = y;
+        public float Spin { get; set; }
         public FallingWord Target { get; } = target;
     }
 

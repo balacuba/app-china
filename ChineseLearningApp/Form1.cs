@@ -629,7 +629,7 @@ public sealed partial class Form1 : Form
             return tile;
         }).ToList();
 
-        var waver = new WavingCat { Size = new Size(84, 84) };
+        var waver = new WavingCat { Size = new Size(168, 92) };
         host.Controls.Add(title);
         host.Controls.Add(waver);
         host.Controls.Add(subtitle);
@@ -729,6 +729,7 @@ public sealed partial class Form1 : Form
                 ControlStyles.ResizeRedraw |
                 ControlStyles.UserPaint,
                 true);
+            CatArt.Animate(this);
             BackColor = PageColor;
         }
 
@@ -1876,7 +1877,7 @@ public sealed partial class Form1 : Form
         }
 
         _practiceTitle.Text = _ninjaMode
-            ? "🐱 Mèo bắn bong bóng: gõ chữ trong bong bóng để mèo bắn vỡ bóng"
+            ? "🐱 Mèo bắn bong bóng: gõ chữ trong bong bóng để mèo ném len làm vỡ bóng"
             : _practiceExampleMode
                 ? "Nhìn câu tiếng Việt, gõ lại câu ví dụ tiếng Trung"
                 : "Nhìn nghĩa tiếng Việt và tiếng Anh, gõ từ tiếng Trung";
@@ -4553,6 +4554,7 @@ public sealed partial class Form1 : Form
                 ControlStyles.ResizeRedraw |
                 ControlStyles.UserPaint,
                 true);
+            CatArt.Animate(this);
             BackColor = SurfaceColor;
         }
 
@@ -4602,6 +4604,7 @@ public sealed partial class Form1 : Form
                 ControlStyles.ResizeRedraw |
                 ControlStyles.UserPaint,
                 true);
+            CatArt.Animate(this);
             Cursor = Cursors.Hand;
             BackColor = PageColor;
         }
@@ -4642,7 +4645,7 @@ public sealed partial class Form1 : Form
                 graphics.FillEllipse(badgeFill, badgeBounds);
             }
 
-            if (!CatArt.TryDrawIcon(graphics, badgeBounds, Icon))
+            if (!CatArt.TryDrawIcon(graphics, badgeBounds, Icon, _hover))
             {
                 using var iconFont = new Font("Segoe UI Emoji", 24F);
                 TextRenderer.DrawText(graphics, Icon, iconFont, Rectangle.Round(badgeBounds), TextColor,
