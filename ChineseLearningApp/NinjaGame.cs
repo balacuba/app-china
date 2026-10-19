@@ -27,8 +27,6 @@ internal sealed class NinjaGame : Panel
     private const int HitsPerLevel = 8;
     private const float RoofHeight = 26;
 
-    // Words further away than this (sideways) get a diagonal throw instead of a run.
-    private const float DiagonalThrowDistance = 300;
 
     private static readonly Color[] TextColors =
     [
@@ -46,10 +44,10 @@ internal sealed class NinjaGame : Panel
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 15 };
     // Pause after typing before it is checked. When the text could still grow into
     // another falling word (你 → 你好, ni → nihao), the shorter word is only shot
-    // once the learner has typed nothing for 2 seconds in all: this pause plus the
+    // once the learner has typed nothing for 0.9 seconds in all: this pause plus the
     // longer one that follows it.
-    private const int AutoHitDelay = 350;
-    private const int PrefixHitDelay = 2000 - AutoHitDelay;
+    private const int AutoHitDelay = 300;
+    private const int PrefixHitDelay = 900 - AutoHitDelay;
 
     private readonly System.Windows.Forms.Timer _autoHit = new() { Interval = AutoHitDelay };
     private readonly Stopwatch _clock = new();
@@ -77,6 +75,8 @@ internal sealed class NinjaGame : Panel
     private bool _running;
     private bool _gameOver;
     private bool _prefixWaited;
+    // When the longer wait began (game clock, seconds), for its countdown bar.
+    private double _prefixSince;
     private string _composition = string.Empty;
 
     // The cat on the roof and the balls of yarn in flight.
@@ -755,10 +755,13 @@ internal sealed class NinjaGame : Panel
         // When a longer falling word starts the same way (你 while 你好 is falling, or
         // ni while nihao is), give the learner a little longer to finish it before the
         // shorter one is shot, so neither needs Enter.
-        if (!fromEnter && !_prefixWaited && _words.Any(falling => !falling.Targeted && CouldBecome(falling, typed, typedKey)))
+        if (!fromEnter && !_prefixWaited &&
+            _words.Any(falling => !falling.Targeted && IsAnswer(falling, typed, typedKey)) &&
+            _words.Any(falling => !falling.Targeted && CouldBecome(falling, typed, typedKey)))
         {
             _prefixWaited = true;
             _autoHit.Interval = PrefixHitDelay;
+            _prefixSince = _clock.Elapsed.TotalSeconds;
             _autoHit.Start();
             return;
         }
@@ -811,8 +814,8 @@ internal sealed class NinjaGame : Panel
         Hit?.Invoke(target.Word);
     }
 
-    // The cat runs to the next marked word and fires once under it; with
-    // nothing to hit it patrols the roof.
+    // The cat throws at each marked word as soon as it is marked; between
+    // throws it pads about the roof.
     private void UpdateNinja(double dt, RectangleF sky)
     {
         while (_aiming is null && _targets.Count > 0)
@@ -824,52 +827,41 @@ internal sealed class NinjaGame : Panel
             }
         }
 
-        float goal;
-        float speed;
+        // A marked word gets its yarn straight away, thrown from wherever the cat
+        // is (the ball homes in); then the cat trots over towards it.
+        _throwPose = Math.Max(0, _throwPose - dt);
         if (_aiming is not null)
         {
-            goal = _aiming.CentreX;
-            speed = 900;
+            _facing = Math.Sign(_aiming.CentreX - _ninjaX) is var side and not 0 ? side : _facing;
+            _balls.Add(new Ball(_yarnAt.X, _yarnAt.Y, _aiming));
+            _hopSpeed = Math.Max(_hopSpeed, 340);
+            _wanderTo = Math.Clamp(_aiming.CentreX, 40, Math.Max(40, sky.Width - 40));
+            _aiming = null;
+            _throwPose = 0.3;
         }
-        else
+
+        if (Math.Abs(_wanderTo - _ninjaX) < 4)
         {
-            if (Math.Abs(_wanderTo - _ninjaX) < 4)
-            {
-                _wanderTo = 40 + (float)_random.NextDouble() * Math.Max(1, sky.Width - 80);
-            }
-
-            goal = _wanderTo;
-            speed = 120;
+            _wanderTo = 40 + (float)_random.NextDouble() * Math.Max(1, sky.Width - 80);
         }
 
+        var goal = _wanderTo;
+        var speed = _throwPose > 0 ? 0 : 160f;
         var step = (float)(speed * dt);
         var distance = goal - _ninjaX;
-        _ninjaRunning = Math.Abs(distance) > 2;
+        _ninjaRunning = speed > 0 && Math.Abs(distance) > 2;
         if (_ninjaRunning)
         {
             _facing = Math.Sign(distance);
             _ninjaX += Math.Clamp(distance, -step, step);
-            _runPhase += dt * (speed > 200 ? 20 : 9);
-        }
-
-        _throwPose = Math.Max(0, _throwPose - dt);
-        // Close words: run underneath and throw straight up. Far words: turn
-        // and throw diagonally from where the cat stands.
-        if (_aiming is not null &&
-            (Math.Abs(_aiming.CentreX - _ninjaX) < 8 || Math.Abs(_aiming.CentreX - _ninjaX) > DiagonalThrowDistance))
-        {
-            _facing = Math.Sign(_aiming.CentreX - _ninjaX) is var side and not 0 ? side : _facing;
-            _ninjaRunning = false;
-            _balls.Add(new Ball(_yarnAt.X, _yarnAt.Y, _aiming));
-            _hopSpeed = Math.Max(_hopSpeed, 340);
-            _aiming = null;
-            _throwPose = 0.3;
+            _runPhase += dt * 11;
         }
     }
+
     // Balls of yarn spin and home in on their bubble; one that lost its bubble flies off the top.
     private void UpdateBalls(double dt)
     {
-        const float speed = 1000;
+        const float speed = 1300;
         for (var index = _balls.Count - 1; index >= 0; index--)
         {
             var ball = _balls[index];
@@ -1080,6 +1072,18 @@ internal sealed class NinjaGame : Panel
 
         TextRenderer.DrawText(graphics, typed, TypedFont, Rectangle.Round(bounds), Color.FromArgb(226, 232, 240),
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+
+        // While a shorter word waits in case a longer one is being typed, a bar
+        // under the text runs down to the moment it is thrown at.
+        if (_prefixWaited && _autoHit.Enabled)
+        {
+            var left = 1 - (_clock.Elapsed.TotalSeconds - _prefixSince) * 1000 / PrefixHitDelay;
+            var width = (float)Math.Clamp(left, 0, 1) * (bounds.Width - 24);
+            using var bar = new SolidBrush(Color.FromArgb(220, 250, 128, 170));
+            using var track = new SolidBrush(Color.FromArgb(70, 255, 255, 255));
+            graphics.FillRectangle(track, bounds.X + 12, bounds.Bottom + 4, bounds.Width - 24, 3);
+            graphics.FillRectangle(bar, bounds.X + 12, bounds.Bottom + 4, width, 3);
+        }
     }
 
     // Plain glowing text, no frame: characters, characters over pinyin, or pinyin.
