@@ -22,7 +22,6 @@ internal enum NinjaGameMode
 // characters; when only characters are shown, their pinyin (no tones) counts too.
 internal sealed class NinjaGame : Panel
 {
-    private const int InputHeight = 76;
     private const int MaxLives = 3;
     private const int HitsPerLevel = 8;
     private const float RoofHeight = 26;
@@ -62,7 +61,6 @@ internal sealed class NinjaGame : Panel
     private readonly List<PointF> _stars = [];
     private readonly List<Snowflake> _snow = [];
     private readonly TextBox _input = new();
-    private readonly Form1.RoundedPanel _inputFrame = new();
     private readonly Button _startButton;
     private readonly Button[] _modeButtons;
     private double _lastTime;
@@ -80,6 +78,7 @@ internal sealed class NinjaGame : Panel
     private bool _running;
     private bool _gameOver;
     private bool _prefixWaited;
+    private string _composition = string.Empty;
 
     // The ninja on the roof and the shurikens in flight.
     private readonly Queue<FallingWord> _targets = new();
@@ -136,7 +135,7 @@ internal sealed class NinjaGame : Panel
     private Font _pinyinUnderFont;
     private Font _pinyinOnlyFont;
 
-    private float Scale => _textScale / 100f;
+    private float SizeFactor => _textScale / 100f;
 
     private static (Font Hanzi, Font PinyinUnder, Font PinyinOnly) CreateFonts(int scale) =>
     (
@@ -156,41 +155,24 @@ internal sealed class NinjaGame : Panel
             true);
         BackColor = Form1.SurfaceColor;
 
-        // Rounded answer box under the sky.
-        _inputFrame.Size = new Size(420, 50);
-        _inputFrame.Radius = 22;
-        _inputFrame.FillColor = Form1.SurfaceColor;
-        _inputFrame.OutlineColor = Form1.Accent;
-        _inputFrame.OutlineWidth = 2F;
-        _inputFrame.BackColor = Form1.SurfaceColor;
+        // No answer box: typing goes into a box kept just outside the game, so it is
+        // never seen but still takes keys and the Chinese input method. What has been
+        // typed shows on the words themselves (in red) and in a small line above the roof.
         _input.BorderStyle = BorderStyle.None;
         _input.Font = new Font("Microsoft YaHei UI", 16F);
-        _input.BackColor = Form1.SurfaceColor;
-        _input.TextAlign = HorizontalAlignment.Center;
         _input.ImeMode = ImeMode.On;
-        _input.Location = new Point(24, 12);
-        _input.Width = _inputFrame.Width - 48;
+        _input.Location = new Point(-400, -400);
+        _input.Width = 300;
         // Typing is checked a moment after it stops, so a word the input method sends
-        // in pieces (你 then 好) arrives whole before it can hit anything.
-        // While the input method is still composing the next character, keep waiting.
+        // in pieces (你 then 好) arrives whole before it can hit anything. Pinyin still
+        // being composed in the input method counts too, so "nihao" fires at 你好
+        // without picking characters or pressing Enter.
         _autoHit.Tick += (_, _) =>
         {
             _autoHit.Stop();
-            if (IsComposing())
-            {
-                _autoHit.Start();
-                return;
-            }
-
             TryHit(fromEnter: false);
         };
-        _input.TextChanged += (_, _) =>
-        {
-            _autoHit.Stop();
-            _prefixWaited = false;
-            _autoHit.Interval = AutoHitDelay;
-            _autoHit.Start();
-        };
+        _input.TextChanged += (_, _) => RestartAutoHit();
         _input.KeyDown += (_, e) =>
         {
             if (e.KeyCode == Keys.Enter)
@@ -199,8 +181,7 @@ internal sealed class NinjaGame : Panel
                 e.SuppressKeyPress = true;
             }
         };
-        _inputFrame.Controls.Add(_input);
-        Controls.Add(_inputFrame);
+        Controls.Add(_input);
 
         // Mode pills and the start button live on the start / game-over screen.
         (string Text, NinjaGameMode Mode)[] modes =
@@ -229,7 +210,25 @@ internal sealed class NinjaGame : Panel
         _timer.Tick += (_, _) => Step();
     }
 
-    private RectangleF Sky => new(0, 0, Width, Math.Max(1, Height - InputHeight));
+    private RectangleF Sky => new(0, 0, Width, Math.Max(1, Height));
+
+    // Clicking anywhere in the game puts the keyboard back on the hidden box.
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        base.OnMouseDown(e);
+        _input.Focus();
+    }
+
+    private void RestartAutoHit()
+    {
+        _autoHit.Stop();
+        _prefixWaited = false;
+        _autoHit.Interval = AutoHitDelay;
+        _autoHit.Start();
+    }
+
+    // Everything typed so far: committed text plus pinyin still being composed.
+    private string Typed => (_input.Text + _composition).Trim();
 
     private int Level => 1 + _hits / HitsPerLevel;
 
@@ -251,9 +250,6 @@ internal sealed class NinjaGame : Panel
             _modeButtons[index].ForeColor = selected ? Color.White : Form1.Accent;
         }
 
-        _input.PlaceholderText = mode == NinjaGameMode.Hanzi
-            ? "Gõ chữ Hán hoặc pinyin rồi nhấn Enter"
-            : "Gõ chữ Hán rồi nhấn Enter";
         Invalidate();
     }
 
@@ -271,7 +267,6 @@ internal sealed class NinjaGame : Panel
     protected override void OnResize(EventArgs eventargs)
     {
         base.OnResize(eventargs);
-        _inputFrame.Location = new Point((Width - _inputFrame.Width) / 2, Height - InputHeight + 14);
         var centreY = (int)(Sky.Height / 2);
         var modesWidth = _modeButtons.Sum(button => button.Width) + 12 * (_modeButtons.Length - 1);
         var left = (Width - modesWidth) / 2;
@@ -319,7 +314,6 @@ internal sealed class NinjaGame : Panel
         _lives = MaxLives;
         _hits = 0;
         _bloodMoon = 0;
-        TintInputFrame();
         _gameOver = false;
         _spawnIn = 0.3;
         _ninjaX = _wanderTo = Width / 2f;
@@ -387,6 +381,13 @@ internal sealed class NinjaGame : Panel
         var now = _clock.Elapsed.TotalSeconds;
         var dt = Math.Min(0.05, now - _lastTime);
         _lastTime = now;
+        if (Height < 120)
+        {
+            // Minimised (or squeezed to nothing): there is no sky for words to fall
+            // through, so the game holds still instead of every word landing at once.
+            return;
+        }
+
         _twinkle += dt;
         var sky = Sky;
 
@@ -471,32 +472,56 @@ internal sealed class NinjaGame : Panel
 
         _floats.RemoveAll(text => text.Life <= 0);
         _flash = Math.Max(0, _flash - dt);
+
+        // Pinyin being composed in the input method changes without any text event,
+        // so it is looked at every frame; a change restarts the wait before checking.
+        var composition = ReadComposition();
+        if (composition != _composition)
+        {
+            _composition = composition;
+            RestartAutoHit();
+        }
+
         UpdateSnow(dt, sky);
 
         // The moon slowly reddens as hearts run out: a hint at 2, a blood moon at 1.
         var moonTarget = _lives >= MaxLives ? 0 : _lives == 2 ? 0.45 : 1;
         _bloodMoon += Math.Clamp(moonTarget - _bloodMoon, -dt * 0.5, dt * 0.5);
-        TintInputFrame();
         Invalidate();
     }
 
-    // True while the input method has unfinished text (e.g. "hao" not yet picked as 好).
-    private bool IsComposing()
+    // The input method's unfinished text, e.g. "ni'hao" not yet picked as 你好.
+    private string ReadComposition()
     {
-        if (!_input.IsHandleCreated)
+        if (!_input.IsHandleCreated || !_input.Focused)
         {
-            return false;
+            return string.Empty;
         }
 
         var context = ImmGetContext(_input.Handle);
         if (context == IntPtr.Zero)
         {
-            return false;
+            return string.Empty;
         }
 
         try
         {
-            return ImmGetCompositionStringW(context, GcsCompStr, IntPtr.Zero, 0) > 0;
+            var bytes = ImmGetCompositionStringW(context, GcsCompStr, IntPtr.Zero, 0);
+            if (bytes <= 0)
+            {
+                return string.Empty;
+            }
+
+            var buffer = System.Runtime.InteropServices.Marshal.AllocHGlobal(bytes);
+            try
+            {
+                ImmGetCompositionStringW(context, GcsCompStr, buffer, bytes);
+                return System.Runtime.InteropServices.Marshal.PtrToStringUni(buffer, bytes / 2);
+            }
+            finally
+            {
+                System.Runtime.InteropServices.Marshal.FreeHGlobal(buffer);
+            }
         }
         finally
         {
@@ -504,7 +529,32 @@ internal sealed class NinjaGame : Panel
         }
     }
 
+    // Throws away what the input method is composing, so a shot word's pinyin does
+    // not turn into characters afterwards.
+    private void CancelComposition()
+    {
+        _composition = string.Empty;
+        if (!_input.IsHandleCreated)
+        {
+            return;
+        }
+
+        var context = ImmGetContext(_input.Handle);
+        if (context == IntPtr.Zero)
+        {
+            return;
+        }
+
+        ImmNotifyIME(context, NiCompositionStr, CpsCancel, 0);
+        ImmReleaseContext(_input.Handle, context);
+    }
+
     private const int GcsCompStr = 0x0008;
+    private const int NiCompositionStr = 0x0015;
+    private const int CpsCancel = 0x0004;
+
+    [System.Runtime.InteropServices.DllImport("imm32.dll")]
+    private static extern bool ImmNotifyIME(IntPtr hIMC, int dwAction, int dwIndex, int dwValue);
 
     [System.Runtime.InteropServices.DllImport("imm32.dll")]
     private static extern IntPtr ImmGetContext(IntPtr hWnd);
@@ -514,17 +564,6 @@ internal sealed class NinjaGame : Panel
 
     [System.Runtime.InteropServices.DllImport("imm32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
     private static extern int ImmGetCompositionStringW(IntPtr hIMC, int dwIndex, IntPtr lpBuf, int dwBufLen);
-
-    // The answer box outline follows the moon, from the app's blue to blood red.
-    private void TintInputFrame()
-    {
-        var outline = Blend(Form1.Accent, Color.FromArgb(220, 38, 38), (float)_bloodMoon);
-        if (_inputFrame.OutlineColor != outline)
-        {
-            _inputFrame.OutlineColor = outline;
-            _inputFrame.Invalidate();
-        }
-    }
 
     // Bigger flakes fall faster; each sways on its own phase and wraps back to the top.
     private void UpdateSnow(double dt, RectangleF sky)
@@ -597,12 +636,29 @@ internal sealed class NinjaGame : Panel
         return pool[_random.Next(pool.Count)];
     }
 
-    // The characters always count; with only characters shown, their pinyin does too.
-    private bool IsAnswer(FallingWord falling, string typed) =>
+    // Pinyin reduced to its bare letters: no tones (marks or numbers), spaces or
+    // apostrophes, lower case, ü as u.
+    private static string PinyinKey(string text) =>
+        string.Concat(Form1.NormalizePinyin(text).Where(char.IsLetter));
+
+    // A word is answered by its characters, or in any mode by its pinyin typed
+    // without tones.
+    private static bool IsAnswer(FallingWord falling, string typed, string typedKey) =>
         string.Equals(falling.Word.Chinese, typed, StringComparison.Ordinal) ||
-        (Mode == NinjaGameMode.Hanzi &&
-         Form1.NormalizePinyin(typed) is { Length: > 0 } pinyin &&
-         pinyin == Form1.NormalizePinyin(falling.Word.Pinyin));
+        (typedKey.Length > 0 && typedKey == PinyinKey(falling.Word.Pinyin));
+
+    // Could what has been typed still grow into this (longer) word: 你 → 你好, ni → nihao.
+    private static bool CouldBecome(FallingWord falling, string typed, string typedKey)
+    {
+        var chinese = falling.Word.Chinese;
+        if (chinese.Length > typed.Length && chinese.StartsWith(typed, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var key = PinyinKey(falling.Word.Pinyin);
+        return typedKey.Length > 0 && key.Length > typedKey.Length && key.StartsWith(typedKey, StringComparison.Ordinal);
+    }
 
     private void TryHit(bool fromEnter)
     {
@@ -611,19 +667,17 @@ internal sealed class NinjaGame : Panel
             return;
         }
 
-        var typed = _input.Text.Trim();
+        var typed = Typed;
+        var typedKey = PinyinKey(typed);
         if (typed.Length == 0)
         {
             return;
         }
 
-        // When a longer falling word starts with the typed characters (你 while 你好 is
-        // also falling), give the learner a little longer to finish 你好 before 你 is
-        // cut down, so neither needs Enter. Pinyin always waits for Enter, since a
-        // syllable can start a longer word.
-        if (!fromEnter && !_prefixWaited && _words.Any(falling => !falling.Targeted &&
-                falling.Word.Chinese.Length > typed.Length &&
-                falling.Word.Chinese.StartsWith(typed, StringComparison.Ordinal)))
+        // When a longer falling word starts the same way (你 while 你好 is falling, or
+        // ni while nihao is), give the learner a little longer to finish it before the
+        // shorter one is shot, so neither needs Enter.
+        if (!fromEnter && !_prefixWaited && _words.Any(falling => !falling.Targeted && CouldBecome(falling, typed, typedKey)))
         {
             _prefixWaited = true;
             _autoHit.Interval = PrefixHitDelay;
@@ -632,18 +686,18 @@ internal sealed class NinjaGame : Panel
         }
 
         var target = _words
-            .Where(falling => !falling.Targeted &&
-                (string.Equals(falling.Word.Chinese, typed, StringComparison.Ordinal) || (fromEnter && IsAnswer(falling, typed))))
+            .Where(falling => !falling.Targeted && IsAnswer(falling, typed, typedKey))
             .OrderByDescending(falling => falling.Y)
             .FirstOrDefault();
         if (target is null)
         {
             if (fromEnter)
             {
-                // Wrong guess: the combo breaks and the box clears.
+                // Wrong guess: the combo breaks and the typing clears.
                 _combo = 0;
-                _floats.Add(new FloatingText("Chưa đúng 😅", Width / 2f, Sky.Bottom - 50, Color.FromArgb(252, 165, 165)));
+                _floats.Add(new FloatingText("Chưa đúng 😅", Width / 2f, Sky.Bottom - 70, Color.FromArgb(252, 165, 165)));
                 _input.Clear();
+                CancelComposition();
             }
 
             return;
@@ -653,6 +707,7 @@ internal sealed class NinjaGame : Panel
         target.Targeted = true;
         _targets.Enqueue(target);
         _input.Clear();
+        CancelComposition();
         Invalidate();
     }
 
@@ -920,6 +975,34 @@ internal sealed class NinjaGame : Panel
         {
             DrawOverlay(graphics, sky);
         }
+        else
+        {
+            DrawTyped(graphics, sky);
+        }
+    }
+
+    private static readonly Font TypedFont = new("Microsoft YaHei UI", 14F, FontStyle.Bold);
+
+    // What is being typed, in a faint pill just above the roof, so a learner can see
+    // their keys without an answer box. Hidden while nothing is typed.
+    private void DrawTyped(Graphics graphics, RectangleF sky)
+    {
+        var typed = Typed;
+        if (typed.Length == 0)
+        {
+            return;
+        }
+
+        var size = TextRenderer.MeasureText(graphics, typed, TypedFont, Size.Empty, TextFormatFlags.NoPadding);
+        var bounds = new RectangleF((sky.Width - size.Width) / 2 - 18, sky.Bottom - RoofHeight - size.Height - 34, size.Width + 36, size.Height + 14);
+        using (var pill = Form1.RoundedMenuRenderer.CreateRoundedPath(bounds, bounds.Height / 2))
+        using (var fill = new SolidBrush(Color.FromArgb(110, 2, 6, 23)))
+        {
+            graphics.FillPath(fill, pill);
+        }
+
+        TextRenderer.DrawText(graphics, typed, TypedFont, Rectangle.Round(bounds), Color.FromArgb(226, 232, 240),
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
     }
 
     // Plain glowing text, no frame: characters, characters over pinyin, or pinyin.
@@ -927,7 +1010,7 @@ internal sealed class NinjaGame : Panel
     private void DrawWord(Graphics graphics, FallingWord falling)
     {
         // The part typed so far turns red: leading characters, or the matching pinyin.
-        var typed = falling.Targeted ? string.Empty : _input.Text.Trim();
+        var typed = falling.Targeted ? string.Empty : Typed;
         var hanziTyped = TypedHanziLength(falling.Word.Chinese, typed);
         var pinyinTyped = TypedPinyinLength(falling.Word, typed, hanziTyped);
 
@@ -1017,7 +1100,7 @@ internal sealed class NinjaGame : Panel
         var radius = MeteorRadius(falling);
         var seed = falling.X * 0.37f;
         var time = (float)_twinkle;
-        var length = 120 * Scale + radius * 2.7f;
+        var length = 120 * SizeFactor + radius * 2.7f;
 
         // Warm haze around the head.
         DrawGlow(graphics, centreX, centreY, radius * 2.5f, Color.FromArgb(85, 249, 115, 22));
@@ -1184,7 +1267,7 @@ internal sealed class NinjaGame : Panel
             var across = radius * (1.4f + 1.4f * hash2) * spread;
             var depth = radius * (0.35f + 0.35f * hash) * spread;
             var tilt = (hash - 0.5f) * 0.6f;
-            var trail = 120 * Scale + radius * 2.7f;
+            var trail = 120 * SizeFactor + radius * 2.7f;
             var lift = radius * (0.2f + 0.6f * hash2) + life * life * trail * 0.85f;
             var spin = 1.1f + 0.9f * hash;
             // The angle runs backwards so the near (lower) half moves left to right.
@@ -1198,7 +1281,7 @@ internal sealed class NinjaGame : Panel
             var speed = MathF.Max(0.001f, MathF.Sqrt(dx * dx + dy * dy));
             // Flares up as it breaks off, then dims and shrinks away.
             var glow = Math.Min(1, life * 8) * (1 - life * life);
-            var size = (2f + 2.6f * hash) * Scale * (sin > 0 ? 1 : 0.75f) * (1 - 0.5f * life);
+            var size = (2f + 2.6f * hash) * SizeFactor * (sin > 0 ? 1 : 0.75f) * (1 - 0.5f * life);
             yield return new Fragment(x, y, size, dx / speed, dy / speed, sin > 0, glow);
         }
     }
@@ -1796,8 +1879,8 @@ internal sealed class NinjaGame : Panel
         {
             title = "⚔ Ninja phi tiêu";
             detail = BestScore > 0
-                ? $"Chọn chữ sẽ rơi, gõ chữ Hán để ninja phóng phi tiêu. Cao nhất: {BestScore}"
-                : "Chọn chữ sẽ rơi, gõ chữ Hán để ninja phóng phi tiêu trước khi chữ chạm mái nhà!";
+                ? $"Gõ chữ Hán hoặc pinyin không dấu của chữ đang rơi để ninja phóng phi tiêu. Cao nhất: {BestScore}"
+                : "Gõ chữ Hán hoặc pinyin không dấu của chữ đang rơi để ninja phóng phi tiêu trước khi chữ chạm mái nhà!";
         }
 
         var centreY = (int)(sky.Height / 2);
