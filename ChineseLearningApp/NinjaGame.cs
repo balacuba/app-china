@@ -305,7 +305,7 @@ internal sealed class NinjaGame : Panel
 
     public void Start()
     {
-        _words.Clear();
+        ClearWords();
         _particles.Clear();
         _explosions.Clear();
         _craters.Clear();
@@ -367,7 +367,7 @@ internal sealed class NinjaGame : Panel
         _running = false;
         _timer.Stop();
         _clock.Stop();
-        _words.Clear();
+        ClearWords();
         _particles.Clear();
         _explosions.Clear();
         _craters.Clear();
@@ -419,6 +419,7 @@ internal sealed class NinjaGame : Panel
             {
                 // Landed on the roof: it blows up and leaves a crater; lose a life and the combo.
                 _words.RemoveAt(index);
+                falling.Image?.Dispose();
                 Explode(falling.CentreX, roofTop, MeteorRadius(falling) * 1.8f, ground: true);
                 ExplodeFragments(falling, ground: true);
                 _craters.Add(new Crater(falling.CentreX));
@@ -659,6 +660,7 @@ internal sealed class NinjaGame : Panel
     private void HitWord(FallingWord target)
     {
         _words.Remove(target);
+        target.Image?.Dispose();
         _combo++;
         _hits++;
         var points = 10 * _combo;
@@ -803,14 +805,7 @@ internal sealed class NinjaGame : Panel
             // Night sky: deep blue gradient, twinkling stars and a glowing moon.
             // Under a blood moon the whole night turns crimson.
             var blood = (float)_bloodMoon;
-            using (var gradient = new LinearGradientBrush(
-                sky,
-                Blend(Color.FromArgb(15, 23, 42), Color.FromArgb(42, 6, 10), blood),
-                Blend(Color.FromArgb(49, 46, 129), Color.FromArgb(127, 21, 35), blood),
-                LinearGradientMode.Vertical))
-            {
-                graphics.FillPath(gradient, skyPath);
-            }
+            graphics.DrawImageUnscaled(SkyBackdrop(sky, skyPath, blood), 0, 0);
 
             var clip = graphics.Clip;
             graphics.SetClip(skyPath);
@@ -931,49 +926,84 @@ internal sealed class NinjaGame : Panel
     // A word already answered turns gold while the shuriken is on its way.
     private void DrawWord(Graphics graphics, FallingWord falling)
     {
-        var color = falling.Targeted ? Color.FromArgb(250, 204, 21) : falling.Color;
-        var x = (int)falling.X;
-        var y = (int)falling.Y;
-        var width = (int)falling.Size.Width;
         // The part typed so far turns red: leading characters, or the matching pinyin.
         var typed = falling.Targeted ? string.Empty : _input.Text.Trim();
         var hanziTyped = TypedHanziLength(falling.Word.Chinese, typed);
         var pinyinTyped = TypedPinyinLength(falling.Word, typed, hanziTyped);
-        void Glow(string text, Font font, Rectangle box, int typedLength)
+
+        // Outlined text is costly to draw, so each word keeps a picture of itself and
+        // only redraws it when its red part or its colour changes.
+        var key = (hanziTyped, pinyinTyped, falling.Targeted);
+        if (falling.Image is null || falling.ImageKey != key)
         {
-            const TextFormatFlags flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding;
-            // A dark outline all round keeps the text readable on the fire.
+            falling.Image?.Dispose();
+            falling.Image = RenderWord(falling, hanziTyped, pinyinTyped);
+            falling.ImageKey = key;
+        }
+
+        graphics.DrawImageUnscaled(falling.Image, (int)falling.X - WordPad, (int)falling.Y - WordPad);
+    }
+
+    private const int WordPad = 4;
+
+    private void ClearWords()
+    {
+        foreach (var falling in _words)
+        {
+            falling.Image?.Dispose();
+        }
+
+        _words.Clear();
+    }
+
+    // A transparent picture of the word: each line centred, with a dark outline all
+    // round so it reads on the fire, and its typed start redrawn in red.
+    private Bitmap RenderWord(FallingWord falling, int hanziTyped, int pinyinTyped)
+    {
+        var color = falling.Targeted ? Color.FromArgb(250, 204, 21) : falling.Color;
+        var width = (int)falling.Size.Width;
+        var height = (int)falling.Size.Height;
+        var image = new Bitmap(width + WordPad * 2, height + WordPad * 2, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+        using var graphics = Graphics.FromImage(image);
+        graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
+        using var format = (StringFormat)StringFormat.GenericTypographic.Clone();
+        format.FormatFlags |= StringFormatFlags.MeasureTrailingSpaces;
+        using var outline = new SolidBrush(Color.FromArgb(28, 14, 8));
+        using var fill = new SolidBrush(color);
+        using var red = new SolidBrush(TypedColor);
+        void Line(string text, Font font, int top, int lineHeight, int typedLength)
+        {
+            var size = graphics.MeasureString(text, font, PointF.Empty, format);
+            var left = WordPad + (width - size.Width) / 2;
+            var y = WordPad + top + (lineHeight - size.Height) / 2;
             foreach (var (dx, dy) in new[] { (-1, -1), (1, -1), (-1, 1), (1, 1), (0, 2), (2, 0), (-2, 0), (0, -2) })
             {
-                var shadow = box;
-                shadow.Offset(dx, dy);
-                TextRenderer.DrawText(graphics, text, font, shadow, Color.FromArgb(28, 14, 8), flags);
+                graphics.DrawString(text, font, outline, left + dx, y + dy, format);
             }
 
-            TextRenderer.DrawText(graphics, text, font, box, color, flags);
+            graphics.DrawString(text, font, fill, left, y, format);
             if (typedLength > 0)
             {
-                // Redraw the typed start in red, left-aligned where the centred text begins.
-                var full = TextRenderer.MeasureText(graphics, text, font, Size.Empty, TextFormatFlags.NoPadding).Width;
-                var start = new Rectangle(box.X + (box.Width - full) / 2, box.Y, box.Width, box.Height);
-                TextRenderer.DrawText(graphics, text[..typedLength], font, start, TypedColor, TextFormatFlags.NoPadding);
+                graphics.DrawString(text[..typedLength], font, red, left, y, format);
             }
         }
 
         switch (Mode)
         {
             case NinjaGameMode.Hanzi:
-                Glow(falling.Word.Chinese, _hanziFont, new Rectangle(x, y, width, (int)falling.Size.Height), hanziTyped);
+                Line(falling.Word.Chinese, _hanziFont, 0, height, hanziTyped);
                 break;
             case NinjaGameMode.HanziPinyin:
                 var hanziHeight = TextRenderer.MeasureText(falling.Word.Chinese, _hanziFont).Height;
-                Glow(falling.Word.Chinese, _hanziFont, new Rectangle(x, y, width, hanziHeight), hanziTyped);
-                Glow(falling.Word.Pinyin, _pinyinUnderFont, new Rectangle(x, y + hanziHeight, width, (int)falling.Size.Height - hanziHeight), pinyinTyped);
+                Line(falling.Word.Chinese, _hanziFont, 0, hanziHeight, hanziTyped);
+                Line(falling.Word.Pinyin, _pinyinUnderFont, hanziHeight, height - hanziHeight, pinyinTyped);
                 break;
             default:
-                Glow(falling.Word.Pinyin, _pinyinOnlyFont, new Rectangle(x, y, width, (int)falling.Size.Height), pinyinTyped);
+                Line(falling.Word.Pinyin, _pinyinOnlyFont, 0, height, pinyinTyped);
                 break;
         }
+
+        return image;
     }
 
     // A blazing meteor: the word sits in a white-hot head with a molten orange edge,
@@ -990,7 +1020,7 @@ internal sealed class NinjaGame : Panel
         var length = 120 * Scale + radius * 2.7f;
 
         // Warm haze around the head.
-        FireDisc(graphics, centreX, centreY, radius * 2.5f, Color.FromArgb(85, 249, 115, 22));
+        DrawGlow(graphics, centreX, centreY, radius * 2.5f, Color.FromArgb(85, 249, 115, 22));
 
         // The trail is a sheaf of sharp blades torn back off the head: long dark
         // violet and red ones behind, orange in the middle and short bright yellow
@@ -1050,7 +1080,7 @@ internal sealed class NinjaGame : Panel
         // pushed up into the trail while its rough edge burns molten orange. Both
         // outlines flicker, and their flames reach further on the upper side.
         var headRadius = radius * 1.05f;
-        FireDisc(graphics, centreX, centreY + radius * 0.15f, headRadius * 1.5f, Color.FromArgb(190, 249, 115, 22));
+        DrawGlow(graphics, centreX, centreY + radius * 0.15f, headRadius * 1.5f, Color.FromArgb(190, 249, 115, 22));
         using (var outer = RaggedBlaze(centreX, centreY, headRadius * 1.22f, 0.75f, seed + 3, time))
         using (var flame = new SolidBrush(Color.FromArgb(235, 234, 88, 12)))
         {
@@ -1130,10 +1160,11 @@ internal sealed class NinjaGame : Panel
     private readonly record struct Fragment(float X, float Y, float Size, float Dx, float Dy, bool Front, float Glow);
 
     // Small meteors keep breaking off the big one. Each starts at the edge of the
-    // blaze, spirals outwards round the word on its own tilted oval (sweeping left
-    // to right on the near side, passing behind on the far side), shrinking and
-    // fading until it burns out, and then another breaks off in its place. Those
-    // still burning share the word's fate: they blow up with it, or crash with it.
+    // blaze and circles the word on its own tilted oval (sweeping left to right on
+    // the near side, passing behind on the far side) while it slowly falls back
+    // along the trail, its circle narrowing with the cone of fire, shrinking and
+    // fading until it burns out; then another breaks off in its place. Those still
+    // burning share the word's fate: they blow up with it, or crash with it.
     private IEnumerable<Fragment> Fragments(FallingWord falling)
     {
         var radius = MeteorRadius(falling);
@@ -1147,11 +1178,14 @@ internal sealed class NinjaGame : Panel
             // How far through its life this one is: each lasts about 2–4 seconds,
             // and they are staggered so some are always breaking off.
             var life = (time / (2f + 2f * hash) + index / (float)count + hash2) % 1f;
-            var spread = 0.7f + 0.6f * MathF.Sqrt(life);
+            // Out to its orbit just after breaking off, then in again as it drops back
+            // up the narrowing trail, which it has nearly reached the end of when it dies.
+            var spread = (0.7f + 0.5f * MathF.Sqrt(life)) * (1 - 0.6f * life);
             var across = radius * (1.4f + 1.4f * hash2) * spread;
             var depth = radius * (0.35f + 0.35f * hash) * spread;
             var tilt = (hash - 0.5f) * 0.6f;
-            var lift = radius * (0.2f + 1.2f * hash2) * spread;
+            var trail = 120 * Scale + radius * 2.7f;
+            var lift = radius * (0.2f + 0.6f * hash2) + life * life * trail * 0.85f;
             var spin = 1.1f + 0.9f * hash;
             // The angle runs backwards so the near (lower) half moves left to right.
             var angle = -time * spin + index * 2.399f + seed;
@@ -1307,6 +1341,57 @@ internal sealed class NinjaGame : Panel
     }
 
     // A soft disc: solid in the middle, fading to nothing at its edge.
+    // The sky's gradient fill, kept as a picture and only redrawn when the size
+    // changes or the blood moon has moved on a step (1/50 of the way).
+    private Bitmap? _skyBackdrop;
+    private (Size Size, int Blood) _skyBackdropKey;
+
+    private Bitmap SkyBackdrop(RectangleF sky, GraphicsPath skyPath, float blood)
+    {
+        var key = (new Size(Width, Height), (int)MathF.Round(blood * 50));
+        if (_skyBackdrop is not null && _skyBackdropKey == key)
+        {
+            return _skyBackdrop;
+        }
+
+        _skyBackdrop?.Dispose();
+        _skyBackdrop = new Bitmap(Math.Max(1, Width), Math.Max(1, Height), System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+        _skyBackdropKey = key;
+        var step = key.Item2 / 50f;
+        using var graphics = Graphics.FromImage(_skyBackdrop);
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        using var gradient = new LinearGradientBrush(
+            sky,
+            Blend(Color.FromArgb(15, 23, 42), Color.FromArgb(42, 6, 10), step),
+            Blend(Color.FromArgb(49, 46, 129), Color.FromArgb(127, 21, 35), step),
+            LinearGradientMode.Vertical);
+        graphics.FillPath(gradient, skyPath);
+        return _skyBackdrop;
+    }
+
+    // A steady glow (a meteor's haze) drawn from a picture made once per size and
+    // colour: copying a premultiplied picture unscaled is by far the cheapest way
+    // GDI+ has to put a soft gradient on screen every frame.
+    private static readonly Dictionary<(int Radius, int Color), Bitmap> GlowCache = [];
+
+    private static void DrawGlow(Graphics graphics, float x, float y, float radius, Color color)
+    {
+        var size = Math.Max(1, (int)radius);
+        if (!GlowCache.TryGetValue((size, color.ToArgb()), out var glow))
+        {
+            glow = new Bitmap(size * 2, size * 2, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+            using (var glowGraphics = Graphics.FromImage(glow))
+            {
+                glowGraphics.SmoothingMode = SmoothingMode.AntiAlias;
+                FireDisc(glowGraphics, size, size, size, color);
+            }
+
+            GlowCache[(size, color.ToArgb())] = glow;
+        }
+
+        graphics.DrawImageUnscaled(glow, (int)(x - size), (int)(y - size));
+    }
+
     private static void FireDisc(Graphics graphics, float x, float y, float radius, Color color)
     {
         if (color.A == 0 || radius < 1)
@@ -1733,6 +1818,10 @@ internal sealed class NinjaGame : Panel
 
         // Answered: it stops falling and waits for the shuriken.
         public bool Targeted { get; set; }
+
+        // The drawn word and what it shows (typed lengths, answered), made on demand.
+        public Bitmap? Image { get; set; }
+        public (int Hanzi, int Pinyin, bool Targeted) ImageKey { get; set; }
 
         public float CentreX => X + Size.Width / 2;
         public float CentreY => Y + Size.Height / 2;
