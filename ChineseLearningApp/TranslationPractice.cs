@@ -79,9 +79,9 @@ internal sealed class TranslationPractice : Panel
         _keyButton = Form1.CreateButton("🔑  API key", (_, _) => AskForKey(), secondary: true);
         _keyButton.Margin = new Padding(10, 0, 0, 0);
         _keyButton.MouseEnter += (_, _) => HideKeyButton(false);
-        _keyButton.MouseLeave += (_, _) => HideKeyButton(GeminiAi.HasKey);
+        _keyButton.MouseLeave += (_, _) => HideKeyButton(TutorAi.HasKey);
         choices.Controls.Add(_keyButton);
-        HideKeyButton(GeminiAi.HasKey);
+        HideKeyButton(TutorAi.HasKey);
 
         // The paragraph, on a soft blue card, with listen / pinyin buttons.
         _topic.AutoSize = true;
@@ -181,7 +181,7 @@ internal sealed class TranslationPractice : Panel
 
         ShowChoices();
         ShowPinyin();
-        SetBusy(false, GeminiAi.HasKey ? string.Empty : "Cần API key Gemini miễn phí: bấm “🔑 API key” để nhập.");
+        SetBusy(false, TutorAi.HasKey ? string.Empty : "Cần API key: bấm “🔑 API key” để nhập key Claude hoặc Gemini (miễn phí).");
     }
 
     private static Label Caption(string text, int left = 0, int top = 9) => new()
@@ -276,16 +276,56 @@ internal sealed class TranslationPractice : Panel
         Relayout();
     }
 
-    // Opens the API key box; once a key is saved the hint about it goes away.
+    // The shape of each answer. Claude is held to it exactly; Gemini follows the
+    // field list in the question.
+    private static readonly Dictionary<string, JsonElement> ParagraphSchema = TutorAi.StringObject("topic", "chinese", "pinyin", "vietnamese");
+
+    private static readonly Dictionary<string, JsonElement> GradeSchema = new()
+    {
+        ["type"] = JsonSerializer.SerializeToElement("object"),
+        ["properties"] = JsonSerializer.SerializeToElement(new
+        {
+            score = new { type = "number" },
+            feedback = new { type = "string" },
+            mistakes = new
+            {
+                type = "array",
+                items = TutorAi.StringObject("chinese", "yours", "better")
+            },
+            better_translation = new { type = "string" }
+        }),
+        ["required"] = JsonSerializer.SerializeToElement(new[] { "score", "feedback", "mistakes", "better_translation" }),
+        ["additionalProperties"] = JsonSerializer.SerializeToElement(false)
+    };
+
+    // Lets the learner pick which AI to set up a key for, marking the one in use;
+    // without a key the right one to start with depends on the learner, so asking
+    // beats guessing.
     private void AskForKey()
     {
-        using var dialog = new GeminiKeyDialog();
-        if (dialog.ShowDialog(FindForm()) == DialogResult.OK)
+        var menu = new ContextMenuStrip { Font = new Font(Form1.UiFontName, 10.5F), ShowImageMargin = false };
+        foreach (var provider in new[] { TutorAi.Claude, TutorAi.Gemini })
         {
-            _status.Text = GeminiAi.HasKey ? "✅ Đã lưu API key. Bấm “Đoạn văn mới” để bắt đầu." : "Đã xóa API key.";
+            var state = !provider.Keys.HasKey ? "chưa có key" : provider == TutorAi.Active ? "đang dùng ✓" : "có key";
+            menu.Items.Add($"{provider.Name}  —  {state}", null, (_, _) => AskForKey(provider));
         }
 
-        HideKeyButton(GeminiAi.HasKey && !_keyButton.ClientRectangle.Contains(_keyButton.PointToClient(Cursor.Position)));
+        menu.Closed += (_, _) => BeginInvoke(menu.Dispose);
+        menu.Show(_keyButton, new Point(0, _keyButton.Height + 4));
+    }
+
+    // Opens the key box for one AI; once a key is saved the hint about it goes away.
+    private void AskForKey(AiProvider provider)
+    {
+        using var dialog = new AiKeyDialog(provider);
+        if (dialog.ShowDialog(FindForm()) == DialogResult.OK)
+        {
+            _status.Text = TutorAi.HasKey
+                ? $"✅ Đã lưu. Đang dùng {TutorAi.Active.Name}. Bấm “Đoạn văn mới” để bắt đầu."
+                : "Đã xóa API key.";
+        }
+
+        HideKeyButton(TutorAi.HasKey && !_keyButton.ClientRectangle.Contains(_keyButton.PointToClient(Cursor.Position)));
     }
 
     // Once a key is saved, the API key button is drawn in the page's own colour so
@@ -325,7 +365,7 @@ internal sealed class TranslationPractice : Panel
             "\"pinyin\": \"pinyin có dấu thanh của cả đoạn\", \"vietnamese\": \"bản dịch tiếng Việt tự nhiên, sát nghĩa\"}";
         try
         {
-            var answer = await GeminiAi.AskJsonAsync(TeacherRole, question, "⏳ Gemini đang viết đoạn văn…", new Progress<string>(text => _status.Text = text), _busy.Token);
+            var answer = await TutorAi.AskJsonAsync(TeacherRole, question, ParagraphSchema, $"⏳ {TutorAi.ShortName} đang viết đoạn văn…", new Progress<string>(text => _status.Text = text), _busy.Token);
             var chinese = answer.Text("chinese").Trim();
             if (chinese.Length == 0)
             {
@@ -347,7 +387,15 @@ internal sealed class TranslationPractice : Panel
             SetBusy(false, "⚠ " + ex.Message);
             if (ex.NeedsKey)
             {
-                AskForKey();
+                // A rejected key: fix that AI's key. No key at all: let them choose.
+                if (TutorAi.HasKey)
+                {
+                    AskForKey(TutorAi.Active);
+                }
+                else
+                {
+                    AskForKey();
+                }
             }
         }
         catch (OperationCanceledException)
@@ -384,7 +432,7 @@ internal sealed class TranslationPractice : Panel
             "\"better_translation\": \"bản dịch hoàn chỉnh, sửa lại từ bản của học viên\"}";
         try
         {
-            var answer = await GeminiAi.AskJsonAsync(TeacherRole, question, "⏳ Gemini đang chấm bài…", new Progress<string>(text => _status.Text = text), _busy.Token);
+            var answer = await TutorAi.AskJsonAsync(TeacherRole, question, GradeSchema, $"⏳ {TutorAi.ShortName} đang chấm bài…", new Progress<string>(text => _status.Text = text), _busy.Token);
             ShowGrade(answer);
             SetBusy(false);
         }
@@ -393,7 +441,15 @@ internal sealed class TranslationPractice : Panel
             SetBusy(false, "⚠ " + ex.Message);
             if (ex.NeedsKey)
             {
-                AskForKey();
+                // A rejected key: fix that AI's key. No key at all: let them choose.
+                if (TutorAi.HasKey)
+                {
+                    AskForKey(TutorAi.Active);
+                }
+                else
+                {
+                    AskForKey();
+                }
             }
         }
         catch (OperationCanceledException)

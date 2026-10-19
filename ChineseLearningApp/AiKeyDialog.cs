@@ -3,15 +3,14 @@ using System.Runtime.InteropServices;
 
 namespace ChineseLearningApp;
 
-// Getting the learner's free Gemini API key with as little effort as possible:
-// one button opens Google AI Studio in the browser, where they sign in to their
-// own Google account and create and copy a key. While this box is open it watches
-// the clipboard, so a copied key is picked up, checked with Google and saved
-// without pasting. A key can also be pasted by hand.
-internal sealed class GeminiKeyDialog : Form
+// Getting the learner's API key for an AI service (Claude or Gemini) with as
+// little effort as possible: one button opens the service's key page in the
+// browser, where they sign in to their own account and create and copy a key.
+// While this box is open it watches the clipboard, so a copied key is picked up,
+// checked with the service and saved without pasting. A key can also be pasted.
+internal sealed class AiKeyDialog : Form
 {
-    private const string KeyPage = "https://aistudio.google.com/app/apikey";
-
+    private readonly AiProvider _provider;
     private readonly TextBox _key = new();
     private readonly Label _status = new();
     private readonly Button _save;
@@ -20,9 +19,10 @@ internal sealed class GeminiKeyDialog : Form
     private string _lastClipboard = string.Empty;
     private bool _checking;
 
-    public GeminiKeyDialog()
+    public AiKeyDialog(AiProvider provider)
     {
-        Text = "API key Gemini";
+        _provider = provider;
+        Text = $"API key {provider.Name}";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
@@ -30,32 +30,30 @@ internal sealed class GeminiKeyDialog : Form
         StartPosition = FormStartPosition.CenterParent;
         BackColor = Form1.SurfaceColor;
         Font = new Font(Form1.UiFontName, 10.5F);
-        ClientSize = new Size(580, 380);
+        ClientSize = new Size(580, 404);
         Padding = new Padding(24, 20, 24, 20);
 
         var title = new Label
         {
             AutoSize = true,
-            Text = "🔑  Kết nối Google Gemini",
+            Text = $"🔑  Kết nối {provider.Name}",
             Font = new Font("Segoe UI Semibold", 14F),
             ForeColor = Form1.TextColor
         };
         var steps = new Label
         {
             AutoSize = false,
-            Size = new Size(530, 72),
+            Size = new Size(530, 96),
             ForeColor = Form1.BodyTextColor,
-            Text = "1. Bấm nút dưới đây để mở Google AI Studio, đăng nhập tài khoản Google của bạn.\n" +
-                   "2. Bấm “Create API key” (miễn phí), rồi bấm nút Copy bên cạnh key.\n" +
-                   "3. Xong! App tự nhận key vừa copy, kiểm tra và lưu lại."
+            Text = provider.Steps
         };
-        var signIn = Form1.CreateButton("🌐  Đăng nhập Google và lấy key", (_, _) => OpenKeyPage());
+        var signIn = Form1.CreateButton("🌐  Đăng nhập và lấy key", (_, _) => OpenKeyPage());
         signIn.Margin = new Padding(0, 4, 0, 10);
 
         _key.Width = 420;
         _key.UseSystemPasswordChar = true;
-        _key.PlaceholderText = "…hoặc dán key vào đây (bắt đầu bằng AIza)";
-        _key.Text = GeminiKey.Load();
+        _key.PlaceholderText = "…hoặc dán key vào đây";
+        _key.Text = provider.Keys.Load();
         var show = new CheckBox { AutoSize = true, Text = "Hiện key", Margin = new Padding(12, 4, 0, 0) };
         show.CheckedChanged += (_, _) => _key.UseSystemPasswordChar = !show.Checked;
         var keyRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = Padding.Empty };
@@ -90,16 +88,16 @@ internal sealed class GeminiKeyDialog : Form
     {
         try
         {
-            Process.Start(new ProcessStartInfo(KeyPage) { UseShellExecute = true });
+            Process.Start(new ProcessStartInfo(_provider.KeyPage) { UseShellExecute = true });
             ShowStatus("⏳ Đang chờ bạn đăng nhập, tạo key và bấm Copy trong trình duyệt…", Form1.Accent);
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
-            ShowStatus($"Không mở được trình duyệt. Hãy tự mở {KeyPage}", Form1.DangerText);
+            ShowStatus($"Không mở được trình duyệt. Hãy tự mở {_provider.KeyPage}", Form1.DangerText);
         }
     }
 
-    // A newly copied Gemini key goes straight into the box and is checked and saved.
+    // A newly copied key goes straight into the box and is checked and saved.
     private async Task WatchClipboardAsync()
     {
         if (_checking)
@@ -114,7 +112,7 @@ internal sealed class GeminiKeyDialog : Form
         }
 
         _lastClipboard = copied;
-        if (GeminiAi.KeyShape().IsMatch(copied))
+        if (_provider.KeyShape().IsMatch(copied))
         {
             _key.Text = copied;
             Activate();
@@ -140,23 +138,23 @@ internal sealed class GeminiKeyDialog : Form
         key = key.Trim();
         if (key.Length == 0)
         {
-            ShowStatus("Chưa có key. Bấm “Đăng nhập Google và lấy key” hoặc dán key vào ô.", Form1.DangerText);
+            ShowStatus("Chưa có key. Bấm “Đăng nhập và lấy key” hoặc dán key vào ô.", Form1.DangerText);
             return;
         }
 
         _checking = true;
         _save.Enabled = false;
-        ShowStatus("⏳ Đang kiểm tra key với Google…", Form1.Accent);
+        ShowStatus("⏳ Đang kiểm tra key…", Form1.Accent);
         try
         {
-            var problem = await GeminiAi.CheckKeyAsync(key, _closing.Token);
+            var problem = await _provider.CheckKeyAsync(key, _closing.Token);
             if (problem is not null)
             {
                 ShowStatus("⚠ " + problem, Form1.DangerText);
                 return;
             }
 
-            GeminiKey.Save(key);
+            _provider.Keys.Save(key);
             ShowStatus("✅ Key hợp lệ, đã lưu!", Color.FromArgb(22, 163, 74));
             await Task.Delay(700, _closing.Token);
             DialogResult = DialogResult.OK;
@@ -183,7 +181,7 @@ internal sealed class GeminiKeyDialog : Form
     {
         try
         {
-            GeminiKey.Save(string.Empty);
+            _provider.Keys.Save(string.Empty);
             DialogResult = DialogResult.OK;
             Close();
         }

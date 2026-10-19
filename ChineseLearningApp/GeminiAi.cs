@@ -1,29 +1,20 @@
 using System.Net;
 using System.Net.Http;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace ChineseLearningApp;
 
-// A problem talking to the AI, with a message fit to show the learner.
-// `NeedsKey` means the learner has to enter or replace their API key.
-internal sealed class AiException(string message, bool needsKey = false, Exception? inner = null) : Exception(message, inner)
-{
-    public bool NeedsKey { get; } = needsKey;
-}
-
 // Google Gemini through its REST API, with the learner's own free API key from
 // Google AI Studio. Every question asks for a JSON object back.
 internal static partial class GeminiAi
 {
-    // Always the newest Flash model on the free tier, so the app need not change
-    // when Google retires a model version.
-    private const string Endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent";
+    // Always the newest Flash-Lite model on the free tier, so the app need not change
+    // when Google retires a model version. Flash-Lite answers in a second or two;
+    // the full Flash model thinks at length and could take minutes.
+    private const string Endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent";
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(90) };
-
-    public static bool HasKey => GeminiKey.Load().Length > 0;
 
     // What Gemini API keys look like: "AIza" and 35 more letters, digits, - or _.
     [GeneratedRegex(@"^AIza[0-9A-Za-z_\-]{35}$")]
@@ -59,7 +50,7 @@ internal static partial class GeminiAi
     // asks to wait. Busy or briefly rate-limited replies are retried.
     public static async Task<JsonElement> AskJsonAsync(string system, string question, string working, IProgress<string> progress, CancellationToken cancellation)
     {
-        var key = GeminiKey.Load();
+        var key = AiKeyStore.Gemini.Load();
         if (key.Length == 0)
         {
             throw new AiException("Hãy nhập API key Gemini trước (nút 🔑 API key).", needsKey: true);
@@ -192,48 +183,5 @@ internal static partial class GeminiAi
     private sealed class RetryLaterException(int seconds) : Exception
     {
         public int Seconds { get; } = seconds;
-    }
-
-    public static string Text(this JsonElement element, string name) =>
-        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value)
-            ? value.ValueKind == JsonValueKind.String ? value.GetString() ?? string.Empty : value.ToString()
-            : string.Empty;
-}
-
-// The learner's Gemini API key, kept in the app's data folder encrypted with
-// Windows (DPAPI), so it can only be read back by the same Windows user.
-internal static class GeminiKey
-{
-    private static readonly string FilePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "ChineseLearningApp",
-        "gemini-key.bin");
-
-    public static string Load()
-    {
-        try
-        {
-            return File.Exists(FilePath)
-                ? Encoding.UTF8.GetString(ProtectedData.Unprotect(File.ReadAllBytes(FilePath), null, DataProtectionScope.CurrentUser))
-                : string.Empty;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException)
-        {
-            return string.Empty;
-        }
-    }
-
-    // An empty key removes the saved one.
-    public static void Save(string key)
-    {
-        key = key.Trim();
-        Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-        if (key.Length == 0)
-        {
-            File.Delete(FilePath);
-            return;
-        }
-
-        File.WriteAllBytes(FilePath, ProtectedData.Protect(Encoding.UTF8.GetBytes(key), null, DataProtectionScope.CurrentUser));
     }
 }
