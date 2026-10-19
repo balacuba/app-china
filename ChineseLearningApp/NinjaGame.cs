@@ -122,31 +122,49 @@ internal sealed class NinjaGame : Panel
         set
         {
             _textScale = Math.Clamp(value, MinTextScale, MaxTextScale);
-            _hanziFont.Dispose();
-            _pinyinUnderFont.Dispose();
-            _pinyinOnlyFont.Dispose();
-            (_hanziFont, _pinyinUnderFont, _pinyinOnlyFont) = CreateFonts(_textScale);
-            Invalidate();
+            RebuildFonts();
+        }
+    }
+
+    // Extra size for the pinyin alone, in percent of what the text size gives it,
+    // so pinyin can be made easier to read without growing the characters.
+    public int PinyinScale
+    {
+        get => _pinyinScale;
+        set
+        {
+            _pinyinScale = Math.Clamp(value, MinTextScale, MaxTextScale);
+            RebuildFonts();
         }
     }
 
     private int _textScale = 100;
+    private int _pinyinScale = 100;
     private Font _hanziFont;
     private Font _pinyinUnderFont;
     private Font _pinyinOnlyFont;
 
     private float SizeFactor => _textScale / 100f;
 
-    private static (Font Hanzi, Font PinyinUnder, Font PinyinOnly) CreateFonts(int scale) =>
+    private void RebuildFonts()
+    {
+        _hanziFont.Dispose();
+        _pinyinUnderFont.Dispose();
+        _pinyinOnlyFont.Dispose();
+        (_hanziFont, _pinyinUnderFont, _pinyinOnlyFont) = CreateFonts(_textScale, _pinyinScale);
+        Invalidate();
+    }
+
+    private static (Font Hanzi, Font PinyinUnder, Font PinyinOnly) CreateFonts(int scale, int pinyinScale) =>
     (
         new Font("Microsoft YaHei UI", 22F * scale / 100, FontStyle.Bold),
-        new Font("Segoe UI", 11F * scale / 100),
-        new Font("Segoe UI Semibold", 17F * scale / 100)
+        new Font("Segoe UI", 11F * scale / 100 * pinyinScale / 100),
+        new Font("Segoe UI Semibold", 17F * scale / 100 * pinyinScale / 100)
     );
 
     public NinjaGame()
     {
-        (_hanziFont, _pinyinUnderFont, _pinyinOnlyFont) = CreateFonts(_textScale);
+        (_hanziFont, _pinyinUnderFont, _pinyinOnlyFont) = CreateFonts(_textScale, _pinyinScale);
         SetStyle(
             ControlStyles.AllPaintingInWmPaint |
             ControlStyles.OptimizedDoubleBuffer |
@@ -172,7 +190,11 @@ internal sealed class NinjaGame : Panel
             _autoHit.Stop();
             TryHit(fromEnter: false);
         };
-        _input.TextChanged += (_, _) => RestartAutoHit();
+        _input.TextChanged += (_, _) =>
+        {
+            RestartAutoHit();
+            CheckTyping();
+        };
         _input.KeyDown += (_, e) =>
         {
             if (e.KeyCode == Keys.Enter)
@@ -486,6 +508,7 @@ internal sealed class NinjaGame : Panel
         {
             _composition = composition;
             RestartAutoHit();
+            CheckTyping();
         }
 
         UpdateSnow(dt, sky);
@@ -652,6 +675,63 @@ internal sealed class NinjaGame : Panel
     private static bool IsAnswer(FallingWord falling, string typed, string typedKey) =>
         string.Equals(falling.Word.Chinese, typed, StringComparison.Ordinal) ||
         (typedKey.Length > 0 && typedKey == PinyinKey(falling.Word.Pinyin));
+
+    // A wrong key wipes the typing: as soon as what has been typed cannot lead to any
+    // falling word, it is cleared (input method composition too), the combo breaks,
+    // and the learner starts that word again from the beginning. With nothing
+    // falling there is nothing to be wrong about, so typing is left alone.
+    private void CheckTyping()
+    {
+        var typed = Typed;
+        if (!_running || _gameOver || typed.Length == 0 || !_words.Any(falling => !falling.Targeted) || OnTrack(typed))
+        {
+            return;
+        }
+
+        _combo = 0;
+        const string Wrong = "Sai rồi! Gõ lại từ đầu ✋";
+        // One message at a time, however many slips come in a row.
+        _floats.RemoveAll(text => text.Text == Wrong);
+        _floats.Add(new FloatingText(Wrong, Width / 2f, Sky.Bottom - 90, Color.FromArgb(252, 165, 165)));
+        _autoHit.Stop();
+        _input.Clear();
+        CancelComposition();
+    }
+
+    // Is the typing still on its way to some falling word? Its characters must start
+    // the word, and any pinyin letters after them must start the pinyin of the
+    // syllables still to come (tones, spaces and apostrophes don't count), so 你,
+    // 你h, nih and nihao all lead to 你好.
+    private bool OnTrack(string typed)
+    {
+        var characters = string.Concat(typed.Where(IsHanzi));
+        var letters = PinyinKey(string.Concat(typed.Where(character => !IsHanzi(character))));
+        return _words.Any(falling => !falling.Targeted && Fits(falling.Word, characters, letters));
+    }
+
+    private static bool Fits(GameWord word, string characters, string letters)
+    {
+        if (!word.Chinese.StartsWith(characters, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (letters.Length == 0)
+        {
+            return true;
+        }
+
+        // With one syllable per character the pinyin still to come is easy to find;
+        // otherwise only pinyin typed on its own can be checked, against all of it.
+        var syllables = word.Pinyin.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var rest = syllables.Length == word.Chinese.Length
+            ? string.Concat(syllables.Skip(characters.Length))
+            : characters.Length == 0 ? word.Pinyin : string.Empty;
+        return PinyinKey(rest).StartsWith(letters, StringComparison.Ordinal);
+    }
+
+    private static bool IsHanzi(char character) =>
+        character is >= '㐀' and <= '鿿' or >= '豈' and <= '﫿';
 
     // Could what has been typed still grow into this (longer) word: 你 → 你好, ni → nihao.
     private static bool CouldBecome(FallingWord falling, string typed, string typedKey)

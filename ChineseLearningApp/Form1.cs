@@ -1385,8 +1385,13 @@ public sealed partial class Form1 : Form
         // Size of the falling words, and with them the meteors, in percent.
         var textSizeRow = NumberStepper(() => _ninjaGame.TextScale, NinjaGame.MinTextScale, NinjaGame.MaxTextScale, 10,
             "%", SetNinjaTextScale, $"Từ {NinjaGame.MinTextScale}% đến {NinjaGame.MaxTextScale}%");
-        var practiceBody = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6, BackColor = SurfaceColor };
+        // Size of the pinyin alone, on top of the text size.
+        var pinyinSizeRow = NumberStepper(() => _ninjaGame.PinyinScale, NinjaGame.MinTextScale, NinjaGame.MaxTextScale, 10,
+            "%", SetNinjaPinyinScale, $"Từ {NinjaGame.MinTextScale}% đến {NinjaGame.MaxTextScale}%");
+        var practiceBody = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 8, BackColor = SurfaceColor };
         practiceBody.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
+        practiceBody.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));
+        practiceBody.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
         practiceBody.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));
         practiceBody.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
         practiceBody.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));
@@ -1407,8 +1412,10 @@ public sealed partial class Form1 : Form
         practiceBody.Controls.Add(speedRow, 0, 3);
         practiceBody.Controls.Add(SubTitle("Cỡ chữ trong game (Ninja phi tiêu), thiên thạch to nhỏ theo chữ"), 0, 4);
         practiceBody.Controls.Add(textSizeRow, 0, 5);
+        practiceBody.Controls.Add(SubTitle("Cỡ pinyin trong game (Ninja phi tiêu), so với cỡ chữ ở trên"), 0, 6);
+        practiceBody.Controls.Add(pinyinSizeRow, 0, 7);
         var practiceCard = CreateSettingsSection("⏱", Color.FromArgb(220, 252, 231), "Luyện gõ",
-            "Thời gian mỗi câu, tốc độ chữ rơi và cỡ chữ của Ninja phi tiêu.", practiceBody);
+            "Thời gian mỗi câu, tốc độ chữ rơi, cỡ chữ và cỡ pinyin của Ninja phi tiêu.", practiceBody);
 
         // Visible columns: rounded checkboxes in two columns.
         var columnChecks = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, BackColor = SurfaceColor };
@@ -1619,7 +1626,7 @@ public sealed partial class Form1 : Form
             $"Phóng to hoặc thu nhỏ chữ của mỗi cột trong danh sách từ ({MinimumCellFontSize:0}–{MaximumCellFontSize:0} pt).", fontGrid);
 
         const int headingHeight = 72;
-        const int topRowHeight = 370;
+        const int topRowHeight = 450;
         const int bottomRowHeight = 470;
         var fontsRowHeight = 62 + fontRows * 54 + 52 + 34 + 20;
         var grid = new TableLayoutPanel { ColumnCount = 2, RowCount = 4, BackColor = PageColor };
@@ -2060,7 +2067,7 @@ public sealed partial class Form1 : Form
         }
     }
 
-    // Saved as { "FallSeconds": n, "TextScale": percent }. An older file holds a
+    // Saved as { "FallSeconds": n, "TextScale": percent, "PinyinScale": percent }. An older file holds a
     // bare speed factor (1 = normal), which becomes the matching number of seconds.
     // A missing or unreadable file, or a missing value, keeps the default.
     private void LoadNinjaSpeed()
@@ -2087,6 +2094,12 @@ public sealed partial class Form1 : Form
             {
                 _ninjaGame.TextScale = scale.GetInt32();
             }
+
+            if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("PinyinScale", out var pinyinScale) &&
+                pinyinScale.ValueKind == JsonValueKind.Number)
+            {
+                _ninjaGame.PinyinScale = pinyinScale.GetInt32();
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or FormatException)
         {
@@ -2106,6 +2119,12 @@ public sealed partial class Form1 : Form
         SaveNinjaSettings();
     }
 
+    private void SetNinjaPinyinScale(int percent)
+    {
+        _ninjaGame.PinyinScale = percent;
+        SaveNinjaSettings();
+    }
+
     private void SaveNinjaSettings()
     {
         try
@@ -2113,7 +2132,7 @@ public sealed partial class Form1 : Form
             Directory.CreateDirectory(Path.GetDirectoryName(_ninjaSettingsPath)!);
             File.WriteAllText(
                 _ninjaSettingsPath,
-                JsonSerializer.Serialize(new { FallSeconds = (int)_ninjaGame.FallSeconds, _ninjaGame.TextScale }),
+                JsonSerializer.Serialize(new { FallSeconds = (int)_ninjaGame.FallSeconds, _ninjaGame.TextScale, _ninjaGame.PinyinScale }),
                 new UTF8Encoding(false));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
