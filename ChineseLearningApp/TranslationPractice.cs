@@ -25,6 +25,7 @@ internal sealed class TranslationPractice : Panel
     private readonly Button[] _levelButtons;
     private readonly Button[] _lengthButtons;
     private readonly Button _newButton;
+    private readonly Button _keyButton;
     private readonly Button _gradeButton;
     private readonly Button _answerButton;
     private readonly Button _pinyinButton;
@@ -75,9 +76,12 @@ internal sealed class TranslationPractice : Panel
         choices.Controls.Add(Caption("Độ dài", 18));
         choices.Controls.AddRange(_lengthButtons);
         choices.Controls.Add(_newButton);
-        var keyButton = Form1.CreateButton("🔑  API key", (_, _) => AskForKey(), secondary: true);
-        keyButton.Margin = new Padding(10, 0, 0, 0);
-        choices.Controls.Add(keyButton);
+        _keyButton = Form1.CreateButton("🔑  API key", (_, _) => AskForKey(), secondary: true);
+        _keyButton.Margin = new Padding(10, 0, 0, 0);
+        _keyButton.MouseEnter += (_, _) => HideKeyButton(false);
+        _keyButton.MouseLeave += (_, _) => HideKeyButton(GeminiAi.HasKey);
+        choices.Controls.Add(_keyButton);
+        HideKeyButton(GeminiAi.HasKey);
 
         // The paragraph, on a soft blue card, with listen / pinyin buttons.
         _topic.AutoSize = true;
@@ -280,6 +284,19 @@ internal sealed class TranslationPractice : Panel
         {
             _status.Text = GeminiAi.HasKey ? "✅ Đã lưu API key. Bấm “Đoạn văn mới” để bắt đầu." : "Đã xóa API key.";
         }
+
+        HideKeyButton(GeminiAi.HasKey && !_keyButton.ClientRectangle.Contains(_keyButton.PointToClient(Cursor.Position)));
+    }
+
+    // Once a key is saved, the API key button is drawn in the page's own colour so
+    // it disappears, and shows again while the mouse is over it. Without a key it
+    // stays in view, since the learner needs it to get started.
+    private void HideKeyButton(bool hidden)
+    {
+        _keyButton.BackColor = hidden ? Form1.SurfaceColor : Form1.AccentSoft;
+        _keyButton.ForeColor = hidden ? Form1.SurfaceColor : Form1.Accent;
+        _keyButton.FlatAppearance.BorderColor = hidden ? Form1.SurfaceColor : Color.FromArgb(147, 187, 250);
+        _keyButton.Invalidate();
     }
 
     private void SetBusy(bool busy, string status = "")
