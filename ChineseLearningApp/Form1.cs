@@ -13,22 +13,22 @@ namespace ChineseLearningApp;
 public sealed partial class Form1 : Form
 {
     // Theme: one place for the app's colours and fonts.
-    internal static readonly Color Accent = Color.FromArgb(37, 99, 235);
-    private static readonly Color AccentHover = Color.FromArgb(29, 78, 216);
-    private static readonly Color AccentPressed = Color.FromArgb(30, 64, 175);
-    internal static readonly Color AccentSoft = Color.FromArgb(232, 240, 254);
-    private static readonly Color AccentSoftHover = Color.FromArgb(214, 228, 253);
+    internal static readonly Color Accent = Color.FromArgb(234, 108, 70);
+    private static readonly Color AccentHover = Color.FromArgb(219, 90, 52);
+    private static readonly Color AccentPressed = Color.FromArgb(194, 75, 40);
+    internal static readonly Color AccentSoft = Color.FromArgb(255, 236, 226);
+    private static readonly Color AccentSoftHover = Color.FromArgb(253, 221, 204);
     private static readonly Color DangerSoft = Color.FromArgb(254, 236, 236);
     private static readonly Color DangerSoftHover = Color.FromArgb(252, 218, 218);
     internal static readonly Color DangerText = Color.FromArgb(185, 28, 28);
-    internal static readonly Color PageColor = Color.FromArgb(243, 245, 249);
+    internal static readonly Color PageColor = Color.FromArgb(255, 247, 240);
     internal static readonly Color SurfaceColor = Color.White;
-    internal static readonly Color BorderColor = Color.FromArgb(226, 232, 240);
-    private static readonly Color HeaderRowColor = Color.FromArgb(241, 245, 249);
-    private static readonly Color StripeRowColor = Color.FromArgb(249, 250, 252);
-    internal static readonly Color TextColor = Color.FromArgb(30, 41, 59);
-    internal static readonly Color BodyTextColor = Color.FromArgb(51, 65, 85);
-    internal static readonly Color MutedTextColor = Color.FromArgb(100, 116, 139);
+    internal static readonly Color BorderColor = Color.FromArgb(243, 224, 210);
+    private static readonly Color HeaderRowColor = Color.FromArgb(255, 240, 230);
+    private static readonly Color StripeRowColor = Color.FromArgb(255, 250, 246);
+    internal static readonly Color TextColor = Color.FromArgb(74, 47, 35);
+    internal static readonly Color BodyTextColor = Color.FromArgb(99, 70, 55);
+    internal static readonly Color MutedTextColor = Color.FromArgb(156, 124, 108);
     private static readonly Color SuccessColor = Color.FromArgb(22, 128, 61);
     internal const string UiFontName = "Segoe UI";
 
@@ -142,7 +142,7 @@ public sealed partial class Form1 : Form
     private int _practiceDurationSeconds = 10;
     private int _correctAnswerCount;
     private int _wrongAnswerCount;
-    // "Ninja phi tiêu" mini game on the practice page.
+    // "Mèo bắn bong bóng" mini game on the practice page.
     private readonly NinjaGame _ninjaGame = new();
     private readonly List<Control> _practiceModeControls = [];
     private bool _ninjaMode;
@@ -489,7 +489,7 @@ public sealed partial class Form1 : Form
         // The app opens on Home, which leads to the other pages.
         tabs.TabPages.Add(BuildHomePage(tabs,
         [
-            new HomeDestination(vocabularyPage, "📚", "Xem, tìm kiếm và tích chọn từ để học", Color.FromArgb(219, 234, 254)),
+            new HomeDestination(vocabularyPage, "📚", "Xem, tìm kiếm và tích chọn từ để học", Color.FromArgb(255, 228, 214)),
             new HomeDestination(flashcardPage, "🃏", "Lật thẻ để nhớ nghĩa, ví dụ và ngữ pháp", Color.FromArgb(252, 231, 243)),
             new HomeDestination(practicePage, "⌨", "Gõ lại từ và câu ví dụ bằng tiếng Trung", Color.FromArgb(220, 252, 231)),
             new HomeDestination(translationPage, "📝", "AI viết đoạn văn ngắn, bạn dịch và được chấm điểm", Color.FromArgb(237, 233, 254)),
@@ -506,6 +506,11 @@ public sealed partial class Form1 : Form
         Controls.Add(tabs);
         Controls.Add(BuildHeaderBar(tabs));
         tabs.BringToFront();
+        // The faint cat wallpaper runs behind every page.
+        foreach (TabPage page in tabs.TabPages)
+        {
+            CatArt.Wallpaper(page, PageColor);
+        }
     }
 
     // Accent-coloured app bar: the Home button on the left and the app logo and
@@ -530,11 +535,11 @@ public sealed partial class Form1 : Form
         // A lighter-blue pill that returns to Home from any page.
         var homeButton = new RoundedButton();
         StyleButton(homeButton, ButtonKind.Primary);
-        homeButton.BackColor = Color.FromArgb(59, 130, 246);
+        homeButton.BackColor = Color.FromArgb(240, 128, 92);
         homeButton.ForeColor = Color.White;
-        homeButton.FlatAppearance.MouseOverBackColor = Color.FromArgb(96, 165, 250);
-        homeButton.FlatAppearance.MouseDownBackColor = Color.FromArgb(29, 78, 216);
-        homeButton.FlatAppearance.BorderColor = Color.FromArgb(147, 197, 253);
+        homeButton.FlatAppearance.MouseOverBackColor = Color.FromArgb(246, 150, 115);
+        homeButton.FlatAppearance.MouseDownBackColor = Color.FromArgb(219, 90, 52);
+        homeButton.FlatAppearance.BorderColor = Color.FromArgb(250, 190, 160);
         homeButton.Font = new Font("Segoe UI Semibold", 10.5F);
         homeButton.AutoSize = false;
         homeButton.Size = new Size(190, 40);
@@ -571,7 +576,7 @@ public sealed partial class Form1 : Form
             AutoSize = true,
             Font = new Font("Segoe UI Semibold", 26F),
             ForeColor = TextColor,
-            Text = $"Xin chào, {_userName}! 👋"
+            Text = $"Xin chào, {_userName}!"
         };
         var subtitle = new Label
         {
@@ -581,7 +586,7 @@ public sealed partial class Form1 : Form
             Text = "Hôm nay bạn muốn học gì?"
         };
 
-        var totalCard = new StatCard { Icon = "📖", BadgeColor = Color.FromArgb(219, 234, 254), Caption = "Tổng từ vựng" };
+        var totalCard = new StatCard { Icon = "📖", BadgeColor = Color.FromArgb(255, 228, 214), Caption = "Tổng từ vựng" };
         var studyingCard = new StatCard { Icon = "✅", BadgeColor = Color.FromArgb(220, 252, 231), Caption = "Đang học" };
         var missedCard = new StatCard { Icon = "❌", BadgeColor = Color.FromArgb(254, 226, 226), Caption = "Từ gõ sai" };
         var practiceCard = new StatCard { Icon = "🎯", BadgeColor = Color.FromArgb(254, 243, 199), Caption = "Kết quả luyện gõ" };
@@ -624,7 +629,9 @@ public sealed partial class Form1 : Form
             return tile;
         }).ToList();
 
+        var waver = new WavingCat { Size = new Size(84, 84) };
         host.Controls.Add(title);
+        host.Controls.Add(waver);
         host.Controls.Add(subtitle);
         host.Controls.AddRange(statCards.ToArray());
         host.Controls.AddRange(tiles.ToArray());
@@ -656,9 +663,11 @@ public sealed partial class Form1 : Form
             var progressHeight = hskProgress.GetPreferredHeight(gridWidth);
             var totalHeight = title.Height + 8 + subtitle.Height + 28 + statsHeight + gap + tilesHeight + gap + progressHeight;
             var scroll = host.AutoScrollPosition;
-            var top = Math.Max(20, (host.ClientSize.Height - totalHeight) / 2) + scroll.Y;
+            var top = Math.Max(48, (host.ClientSize.Height - totalHeight) / 2) + scroll.Y;
             var centerX = host.ClientSize.Width / 2 + scroll.X;
-            title.Location = new Point(centerX - title.Width / 2, top);
+            // The waving cat sits just right of the greeting; the pair is centred.
+            title.Location = new Point(centerX - (title.Width + waver.Width + 6) / 2, top);
+            waver.Location = new Point(title.Right + 6, top + title.Height - waver.Height + 6);
             top += title.Height + 8;
             subtitle.Location = new Point(centerX - subtitle.Width / 2, top);
             top += subtitle.Height + 28;
@@ -726,7 +735,7 @@ public sealed partial class Form1 : Form
         protected override void OnPaint(PaintEventArgs e)
         {
             var graphics = e.Graphics;
-            graphics.Clear(BackColor);
+            CatArt.PaintBehind(this, graphics, BackColor);
             graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             using (var path = RoundedMenuRenderer.CreateRoundedPath(new RectangleF(1, 1, Width - 3, Height - 3), 18))
             using (var fill = new SolidBrush(SurfaceColor))
@@ -743,8 +752,12 @@ public sealed partial class Form1 : Form
                 graphics.FillEllipse(badgeFill, badgeBounds);
             }
 
-            TextRenderer.DrawText(graphics, Icon, IconFont, badgeBounds, TextColor,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            if (!CatArt.TryDrawIcon(graphics, badgeBounds, Icon))
+            {
+                TextRenderer.DrawText(graphics, Icon, IconFont, badgeBounds, TextColor,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            }
+
             var textLeft = badgeBounds.Right + 14;
             var textWidth = Width - textLeft - 12;
             TextRenderer.DrawText(graphics, Caption, CaptionFont, new Rectangle(textLeft, 14, textWidth, 20),
@@ -768,9 +781,9 @@ public sealed partial class Form1 : Form
         private static readonly Font CountFont = new(UiFontName, 9.5F);
         private static readonly Color[] BarColors =
         [
-            Color.FromArgb(34, 197, 94), Color.FromArgb(20, 184, 166), Color.FromArgb(59, 130, 246),
+            Color.FromArgb(34, 197, 94), Color.FromArgb(20, 184, 166), Color.FromArgb(240, 128, 92),
             Color.FromArgb(99, 102, 241), Color.FromArgb(168, 85, 247), Color.FromArgb(236, 72, 153),
-            Color.FromArgb(249, 115, 22), Color.FromArgb(148, 163, 184)
+            Color.FromArgb(249, 115, 22), Color.FromArgb(205, 180, 165)
         ];
         private IReadOnlyList<HskProgressRow> _rows = [];
 
@@ -797,7 +810,7 @@ public sealed partial class Form1 : Form
         protected override void OnPaint(PaintEventArgs e)
         {
             var graphics = e.Graphics;
-            graphics.Clear(BackColor);
+            CatArt.PaintBehind(this, graphics, BackColor);
             graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             using (var path = RoundedMenuRenderer.CreateRoundedPath(new RectangleF(1, 1, Width - 3, Height - 3), 18))
             using (var fill = new SolidBrush(SurfaceColor))
@@ -822,7 +835,7 @@ public sealed partial class Form1 : Form
                     TextColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
                 var track = new RectangleF(left + levelWidth, top + 8, columnWidth - levelWidth - countWidth - 10, 10);
                 using (var trackPath = RoundedMenuRenderer.CreateRoundedPath(track, 5))
-                using (var trackFill = new SolidBrush(Color.FromArgb(241, 245, 249)))
+                using (var trackFill = new SolidBrush(Color.FromArgb(255, 240, 230)))
                 {
                     graphics.FillPath(trackFill, trackPath);
                 }
@@ -1102,9 +1115,9 @@ public sealed partial class Form1 : Form
         }
         // Soft blue header row with blue headings.
         _grid.ColumnHeadersDefaultCellStyle.BackColor = AccentSoft;
-        _grid.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(30, 64, 175);
+        _grid.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(194, 75, 40);
         _grid.ColumnHeadersDefaultCellStyle.SelectionBackColor = AccentSoft;
-        _grid.ColumnHeadersDefaultCellStyle.SelectionForeColor = Color.FromArgb(30, 64, 175);
+        _grid.ColumnHeadersDefaultCellStyle.SelectionForeColor = Color.FromArgb(194, 75, 40);
         _grid.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI Semibold", 10.5F);
         _grid.ColumnHeadersDefaultCellStyle.Padding = new Padding(4, 10, 4, 10);
         _grid.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
@@ -1113,17 +1126,17 @@ public sealed partial class Form1 : Form
         _grid.DefaultCellStyle.BackColor = SurfaceColor;
         _grid.DefaultCellStyle.ForeColor = TextColor;
         _grid.DefaultCellStyle.Padding = new Padding(8, 5, 8, 5);
-        _grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(219, 234, 254);
+        _grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(255, 228, 214);
         _grid.DefaultCellStyle.SelectionForeColor = TextColor;
         _grid.AlternatingRowsDefaultCellStyle.BackColor = StripeRowColor;
-        _grid.GridColor = Color.FromArgb(214, 222, 233);
+        _grid.GridColor = Color.FromArgb(236, 218, 205);
         _grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
         _grid.RowTemplate.Height = 42;
         _grid.RowTemplate.MinimumHeight = 42;
         // Hán characters in dark blue, pinyin in teal.
         foreach (var (property, color) in new[]
                  {
-                     (nameof(VocabularyWord.Chinese), Color.FromArgb(30, 64, 175)),
+                     (nameof(VocabularyWord.Chinese), Color.FromArgb(194, 75, 40)),
                      (nameof(VocabularyWord.Pinyin), Color.FromArgb(13, 148, 136))
                  })
         {
@@ -1216,7 +1229,7 @@ public sealed partial class Form1 : Form
         manageButtons.Controls.Add(CreateButton("📥  Nhập CSV / TXT", ImportVocabulary));
         manageButtons.Controls.Add(CreateButton("➕  Thêm từ", AddWord));
         manageButtons.Controls.Add(CreateButton("🗑  Xóa toàn bộ", DeleteAllWords, danger: true));
-        var manageCard = CreateSettingsSection("📦", Color.FromArgb(219, 234, 254), "Quản lý từ vựng",
+        var manageCard = CreateSettingsSection("📦", Color.FromArgb(255, 228, 214), "Quản lý từ vựng",
             "Nhập danh sách từ từ tệp, thêm từ mới hoặc xóa toàn bộ.", manageButtons);
 
         // Typing practice: seconds per question with a − / + stepper. The hidden
@@ -1382,7 +1395,7 @@ public sealed partial class Form1 : Form
         // Seconds a word takes to fall to the roof (fewer seconds, faster words).
         var speedRow = NumberStepper(() => (int)_ninjaGame.FallSeconds, NinjaGame.MinFallSeconds, NinjaGame.MaxFallSeconds, 1,
             "giây", SetNinjaFallSeconds, $"Từ {NinjaGame.MinFallSeconds} đến {NinjaGame.MaxFallSeconds} giây");
-        // Size of the falling words, and with them the meteors, in percent.
+        // Size of the falling words, and with them the bubbles, in percent.
         var textSizeRow = NumberStepper(() => _ninjaGame.TextScale, NinjaGame.MinTextScale, NinjaGame.MaxTextScale, 10,
             "%", SetNinjaTextScale, $"Từ {NinjaGame.MinTextScale}% đến {NinjaGame.MaxTextScale}%");
         // Size of the pinyin alone, on top of the text size.
@@ -1408,14 +1421,14 @@ public sealed partial class Form1 : Form
         };
         practiceBody.Controls.Add(SubTitle("Thời gian mỗi câu"), 0, 0);
         practiceBody.Controls.Add(stepper, 0, 1);
-        practiceBody.Controls.Add(SubTitle("Thời gian chữ rơi xuống mái (Ninja phi tiêu), ít giây rơi nhanh hơn"), 0, 2);
+        practiceBody.Controls.Add(SubTitle("Thời gian bong bóng rơi xuống mái (Mèo bắn bong bóng), ít giây rơi nhanh hơn"), 0, 2);
         practiceBody.Controls.Add(speedRow, 0, 3);
-        practiceBody.Controls.Add(SubTitle("Cỡ chữ trong game (Ninja phi tiêu), thiên thạch to nhỏ theo chữ"), 0, 4);
+        practiceBody.Controls.Add(SubTitle("Cỡ chữ trong game (Mèo bắn bong bóng), bong bóng to nhỏ theo chữ"), 0, 4);
         practiceBody.Controls.Add(textSizeRow, 0, 5);
-        practiceBody.Controls.Add(SubTitle("Cỡ pinyin trong game (Ninja phi tiêu), so với cỡ chữ ở trên"), 0, 6);
+        practiceBody.Controls.Add(SubTitle("Cỡ pinyin trong game (Mèo bắn bong bóng), so với cỡ chữ ở trên"), 0, 6);
         practiceBody.Controls.Add(pinyinSizeRow, 0, 7);
         var practiceCard = CreateSettingsSection("⏱", Color.FromArgb(220, 252, 231), "Luyện gõ",
-            "Thời gian mỗi câu, tốc độ chữ rơi, cỡ chữ và cỡ pinyin của Ninja phi tiêu.", practiceBody);
+            "Thời gian mỗi câu, tốc độ chữ rơi, cỡ chữ và cỡ pinyin của Mèo bắn bong bóng.", practiceBody);
 
         // Visible columns: rounded checkboxes in two columns.
         var columnChecks = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, BackColor = SurfaceColor };
@@ -1546,7 +1559,7 @@ public sealed partial class Form1 : Form
         {
             var column = textColumns[index];
             // Each column sits in its own light rounded box so its name and controls read as one.
-            var itemFill = Color.FromArgb(248, 250, 252);
+            var itemFill = Color.FromArgb(255, 250, 246);
             var box = new RoundedPanel
             {
                 Dock = DockStyle.Fill,
@@ -1863,7 +1876,7 @@ public sealed partial class Form1 : Form
         }
 
         _practiceTitle.Text = _ninjaMode
-            ? "⚔ Ninja phi tiêu: gõ chữ đang rơi để ninja phóng phi tiêu"
+            ? "🐱 Mèo bắn bong bóng: gõ chữ trong bong bóng để mèo bắn vỡ bóng"
             : _practiceExampleMode
                 ? "Nhìn câu tiếng Việt, gõ lại câu ví dụ tiếng Trung"
                 : "Nhìn nghĩa tiếng Việt và tiếng Anh, gõ từ tiếng Trung";
@@ -2137,7 +2150,7 @@ public sealed partial class Form1 : Form
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            MessageBox.Show(this, $"Không thể lưu cài đặt Ninja phi tiêu: {ex.Message}", "Lỗi lưu cài đặt",
+            MessageBox.Show(this, $"Không thể lưu cài đặt Mèo bắn bong bóng: {ex.Message}", "Lỗi lưu cài đặt",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
@@ -2450,7 +2463,7 @@ public sealed partial class Form1 : Form
         _answerFrame.Anchor = AnchorStyles.None;
         _answerFrame.Size = new Size(430, 60);
         _answerFrame.Radius = 12;
-        _answerFrame.OutlineColor = Color.FromArgb(148, 163, 184);
+        _answerFrame.OutlineColor = Color.FromArgb(205, 180, 165);
         _answerFrame.Controls.Add(_answerBox);
         _answerFrame.Layout += (_, _) =>
         {
@@ -2465,12 +2478,12 @@ public sealed partial class Form1 : Form
         _answerFrame.Click += (_, _) => _answerBox.Focus();
         void UpdateAnswerFrame()
         {
-            var background = _answerBox.Enabled ? SurfaceColor : Color.FromArgb(241, 245, 249);
+            var background = _answerBox.Enabled ? SurfaceColor : Color.FromArgb(255, 240, 230);
             _answerBox.BackColor = background;
             _answerFrame.FillColor = background;
             _answerFrame.OutlineColor = !_answerBox.Enabled
-                ? Color.FromArgb(203, 213, 225)
-                : _answerBox.Focused ? Accent : Color.FromArgb(148, 163, 184);
+                ? Color.FromArgb(232, 212, 198)
+                : _answerBox.Focused ? Accent : Color.FromArgb(205, 180, 165);
             _answerFrame.OutlineWidth = _answerBox.Focused ? 2F : 1.5F;
             _answerFrame.Invalidate();
         }
@@ -2500,7 +2513,7 @@ public sealed partial class Form1 : Form
             WrapContents = false
         };
         // Mode picker: a rounded button (same look as the others) that opens a menu.
-        string[] practiceModes = ["Gõ từ vựng", "Gõ câu ví dụ", "⚔ Ninja phi tiêu"];
+        string[] practiceModes = ["Gõ từ vựng", "Gõ câu ví dụ", "🐱 Mèo bắn bong bóng"];
         var practiceModeBox = new RoundedButton();
         StyleButton(practiceModeBox, ButtonKind.Secondary);
         Action<int>? checkPracticeMode = null;
@@ -3565,7 +3578,7 @@ public sealed partial class Form1 : Form
             Size = new Size(cardWidth, cardHeight),
             Radius = 16,
             FillColor = SurfaceColor,
-            OutlineColor = Color.FromArgb(203, 213, 225),
+            OutlineColor = Color.FromArgb(232, 212, 198),
             BackColor = SurfaceColor
         };
         card.Controls.Add(new Label
@@ -3826,7 +3839,7 @@ public sealed partial class Form1 : Form
             Size = new Size(menuWidth, menuHeight),
             Radius = 16,
             FillColor = SurfaceColor,
-            OutlineColor = Color.FromArgb(203, 213, 225),
+            OutlineColor = Color.FromArgb(232, 212, 198),
             BackColor = SurfaceColor
         };
         card.Controls.Add(new Label
@@ -3919,7 +3932,7 @@ public sealed partial class Form1 : Form
                 graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
                 var pill = new RectangleF(e.Bounds.Left + 1, e.Bounds.Top + 2, e.Bounds.Width - 3, e.Bounds.Height - 4);
                 using var path = RoundedMenuRenderer.CreateRoundedPath(pill, 9);
-                using var fill = new SolidBrush(word.IsSelected ? AccentSoft : Color.FromArgb(241, 245, 249));
+                using var fill = new SolidBrush(word.IsSelected ? AccentSoft : Color.FromArgb(255, 240, 230));
                 graphics.FillPath(fill, path);
                 graphics.SmoothingMode = smoothing;
             }
@@ -4213,8 +4226,8 @@ public sealed partial class Form1 : Form
     {
         ["HSK 1"] = (Color.FromArgb(220, 252, 231), Color.FromArgb(21, 128, 61)),
         ["HSK 2"] = (Color.FromArgb(204, 251, 241), Color.FromArgb(15, 118, 110)),
-        ["HSK 3"] = (Color.FromArgb(219, 234, 254), Color.FromArgb(29, 78, 216)),
-        ["HSK 4"] = (Color.FromArgb(224, 231, 255), Color.FromArgb(67, 56, 202)),
+        ["HSK 3"] = (Color.FromArgb(255, 228, 214), Color.FromArgb(219, 90, 52)),
+        ["HSK 4"] = (Color.FromArgb(255, 230, 216), Color.FromArgb(67, 56, 202)),
         ["HSK 5"] = (Color.FromArgb(243, 232, 255), Color.FromArgb(126, 34, 206)),
         ["HSK 6"] = (Color.FromArgb(252, 231, 243), Color.FromArgb(190, 24, 93)),
         ["HSK 7-9"] = (Color.FromArgb(255, 237, 213), Color.FromArgb(194, 65, 12))
@@ -4233,7 +4246,7 @@ public sealed partial class Form1 : Form
 
         var (fill, color) = HskBadgeColors.TryGetValue(text, out var colors)
             ? colors
-            : (Color.FromArgb(241, 245, 249), Color.FromArgb(71, 85, 105));
+            : (Color.FromArgb(255, 240, 230), Color.FromArgb(120, 90, 75));
         var graphics = e.Graphics!;
         using var font = new Font("Segoe UI Semibold", 9.5F);
         var textSize = TextRenderer.MeasureText(graphics, text, font, Size.Empty, TextFormatFlags.NoPadding);
@@ -4265,7 +4278,7 @@ public sealed partial class Form1 : Form
             return;
         }
 
-        var hover = Color.FromArgb(239, 246, 255);
+        var hover = Color.FromArgb(255, 244, 236);
         if (_hoverRow >= 0 && _hoverRow < _grid.RowCount)
         {
             _grid.Rows[_hoverRow].DefaultCellStyle.BackColor = Color.Empty;
@@ -4387,7 +4400,7 @@ public sealed partial class Form1 : Form
             {
                 using var fill = new SolidBrush(SurfaceColor);
                 graphics.FillPath(fill, path);
-                using var outline = new Pen(Color.FromArgb(148, 163, 184), 1.5F);
+                using var outline = new Pen(Color.FromArgb(205, 180, 165), 1.5F);
                 graphics.DrawPath(outline, path);
             }
         }
@@ -4512,7 +4525,7 @@ public sealed partial class Form1 : Form
         protected override void OnPaint(PaintEventArgs e)
         {
             var graphics = e.Graphics;
-            graphics.Clear(BackColor);
+            CatArt.PaintBehind(this, graphics, BackColor);
             graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             var circle = new Rectangle(0, (Height - Logo) / 2, Logo, Logo);
             graphics.FillEllipse(Brushes.White, circle);
@@ -4546,7 +4559,7 @@ public sealed partial class Form1 : Form
         protected override void OnPaint(PaintEventArgs e)
         {
             var graphics = e.Graphics;
-            graphics.Clear(BackColor);
+            CatArt.PaintBehind(this, graphics, BackColor);
             graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             const int badge = 44;
             var badgeBounds = new Rectangle(0, 2, badge, badge);
@@ -4555,9 +4568,12 @@ public sealed partial class Form1 : Form
                 graphics.FillEllipse(fill, badgeBounds);
             }
 
-            using var iconFont = new Font("Segoe UI Emoji", 16F);
-            TextRenderer.DrawText(graphics, Icon, iconFont, badgeBounds, TextColor,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            if (!CatArt.TryDrawIcon(graphics, badgeBounds, Icon))
+            {
+                using var iconFont = new Font("Segoe UI Emoji", 16F);
+                TextRenderer.DrawText(graphics, Icon, iconFont, badgeBounds, TextColor,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            }
             using var titleFont = new Font("Segoe UI Semibold", 13F);
             using var descriptionFont = new Font(UiFontName, 10F);
             var textLeft = badge + 14;
@@ -4607,11 +4623,11 @@ public sealed partial class Form1 : Form
         protected override void OnPaint(PaintEventArgs e)
         {
             var graphics = e.Graphics;
-            graphics.Clear(BackColor);
+            CatArt.PaintBehind(this, graphics, BackColor);
             graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             var card = new RectangleF(2, 2, Width - 5, Height - 5);
             using (var path = RoundedMenuRenderer.CreateRoundedPath(card, 22))
-            using (var fill = new SolidBrush(_hover ? Color.FromArgb(248, 251, 255) : SurfaceColor))
+            using (var fill = new SolidBrush(_hover ? Color.FromArgb(255, 251, 247) : SurfaceColor))
             using (var outline = new Pen(_hover ? Accent : BorderColor, _hover ? 2.5F : 1.5F))
             {
                 graphics.FillPath(fill, path);
@@ -4626,9 +4642,12 @@ public sealed partial class Form1 : Form
                 graphics.FillEllipse(badgeFill, badgeBounds);
             }
 
-            using var iconFont = new Font("Segoe UI Emoji", 24F);
-            TextRenderer.DrawText(graphics, Icon, iconFont, Rectangle.Round(badgeBounds), TextColor,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            if (!CatArt.TryDrawIcon(graphics, badgeBounds, Icon))
+            {
+                using var iconFont = new Font("Segoe UI Emoji", 24F);
+                TextRenderer.DrawText(graphics, Icon, iconFont, Rectangle.Round(badgeBounds), TextColor,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            }
 
             using var titleFont = new Font("Segoe UI Semibold", 14F);
             var titleTop = (int)badgeBounds.Bottom + 14;
@@ -4659,7 +4678,7 @@ public sealed partial class Form1 : Form
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            e.Graphics.Clear(Parent?.BackColor ?? SurfaceColor);
+            CatArt.PaintBehind(this, e.Graphics, Parent?.BackColor ?? SurfaceColor);
             DrawRoundedTickBox(e.Graphics, new RectangleF(1, (Height - 20) / 2F, 20, 20), Checked);
             TextRenderer.DrawText(e.Graphics, Text, Font, new Rectangle(30, 0, Width - 30, Height), ForeColor,
                 TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPadding);
@@ -4730,13 +4749,13 @@ public sealed partial class Form1 : Form
             (int)(from.B + (to.B - from.B) * amount));
 
         private Color ArcColor => _paused
-            ? Color.FromArgb(148, 163, 184)
+            ? Color.FromArgb(205, 180, 165)
             : _fraction > 0.5F ? Blend(Amber, Green, (_fraction - 0.5F) * 2) : Blend(Red, Amber, _fraction * 2);
 
         protected override void OnPaint(PaintEventArgs e)
         {
             var graphics = e.Graphics;
-            graphics.Clear(BackColor);
+            CatArt.PaintBehind(this, graphics, BackColor);
             if (!_visibleFace)
             {
                 return;
@@ -4751,13 +4770,13 @@ public sealed partial class Form1 : Form
             var arcBounds = RectangleF.Inflate(face, -ring / 2, -ring / 2);
 
             // Soft face with twelve clock ticks.
-            using (var faceFill = new SolidBrush(Color.FromArgb(248, 250, 252)))
+            using (var faceFill = new SolidBrush(Color.FromArgb(255, 250, 246)))
             {
                 graphics.FillEllipse(faceFill, face);
             }
 
             var center = new PointF(face.X + face.Width / 2, face.Y + face.Height / 2);
-            using (var tick = new Pen(Color.FromArgb(203, 213, 225), 1.6F) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round })
+            using (var tick = new Pen(Color.FromArgb(232, 212, 198), 1.6F) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round })
             {
                 var outer = face.Width / 2 - ring - 4;
                 for (var hour = 0; hour < 12; hour++)
@@ -4771,7 +4790,7 @@ public sealed partial class Form1 : Form
             }
 
             // Track, then the time left as an arc from 12 o'clock, clockwise.
-            using (var track = new Pen(Color.FromArgb(226, 232, 240), ring))
+            using (var track = new Pen(Color.FromArgb(243, 224, 210), ring))
             {
                 graphics.DrawEllipse(track, arcBounds);
             }
@@ -4838,7 +4857,7 @@ public sealed partial class Form1 : Form
         protected override void OnPaint(PaintEventArgs e)
         {
             var graphics = e.Graphics;
-            graphics.Clear(GetSolidParentColor());
+            CatArt.PaintBehind(this, graphics, Color.Transparent);
             graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             var inset = OutlineWidth / 2F;
             var bounds = new RectangleF(inset, inset, Width - OutlineWidth - 1, Height - OutlineWidth - 1);
@@ -4859,20 +4878,6 @@ public sealed partial class Form1 : Form
 
             using var outline = new Pen(OutlineColor, OutlineWidth);
             graphics.DrawPath(outline, path);
-        }
-
-        // Corners show the first non-transparent background up the parent chain.
-        private Color GetSolidParentColor()
-        {
-            for (var parent = Parent; parent is not null; parent = parent.Parent)
-            {
-                if (parent.BackColor.A == 255)
-                {
-                    return parent.BackColor;
-                }
-            }
-
-            return PageColor;
         }
     }
 
@@ -4927,10 +4932,10 @@ public sealed partial class Form1 : Form
         protected override void OnPaint(PaintEventArgs e)
         {
             var graphics = e.Graphics;
-            graphics.Clear(Parent?.BackColor ?? SystemColors.Control);
+            CatArt.PaintBehind(this, graphics, Parent?.BackColor ?? SystemColors.Control);
             graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             var fill = !Enabled
-                ? Color.FromArgb(241, 245, 249)
+                ? Color.FromArgb(255, 240, 230)
                 : _pressed
                     ? FlatAppearance.MouseDownBackColor
                     : _hovered
@@ -4942,7 +4947,7 @@ public sealed partial class Form1 : Form
             {
                 graphics.FillPath(brush, path);
                 var borderColor = !Enabled
-                    ? Color.FromArgb(203, 213, 225)
+                    ? Color.FromArgb(232, 212, 198)
                     : FlatAppearance.BorderColor.IsEmpty ? BorderColor : FlatAppearance.BorderColor;
                 using (var borderPen = new Pen(borderColor, 1.5F))
                 {
@@ -4951,7 +4956,7 @@ public sealed partial class Form1 : Form
 
                 if (Focused && ShowFocusCues)
                 {
-                    using var focusPen = new Pen(Color.FromArgb(147, 197, 253), 2F);
+                    using var focusPen = new Pen(Color.FromArgb(250, 190, 160), 2F);
                     graphics.DrawPath(focusPen, path);
                 }
             }
@@ -4961,7 +4966,7 @@ public sealed partial class Form1 : Form
                 Text,
                 Font,
                 ClientRectangle,
-                Enabled ? ForeColor : Color.FromArgb(148, 163, 184),
+                Enabled ? ForeColor : Color.FromArgb(205, 180, 165),
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
                 TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
         }
@@ -5004,7 +5009,7 @@ public sealed partial class Form1 : Form
             using var path = CreateRoundedPath(
                 new RectangleF(0.5F, 0.5F, e.ToolStrip.Width - 1.5F, e.ToolStrip.Height - 1.5F),
                 10);
-            using var pen = new Pen(Color.FromArgb(147, 187, 250), 1.5F);
+            using var pen = new Pen(Color.FromArgb(247, 178, 150), 1.5F);
             e.Graphics.DrawPath(pen, path);
         }
 
@@ -5048,7 +5053,7 @@ public sealed partial class Form1 : Form
     private sealed class PillLabel : Label
     {
         public Color FillColor { get; set; } = AccentSoft;
-        public Color OutlineColor { get; set; } = Color.FromArgb(147, 187, 250);
+        public Color OutlineColor { get; set; } = Color.FromArgb(247, 178, 150);
 
         public PillLabel()
         {
@@ -5067,7 +5072,7 @@ public sealed partial class Form1 : Form
         protected override void OnPaint(PaintEventArgs e)
         {
             var graphics = e.Graphics;
-            graphics.Clear(Parent?.BackColor ?? SurfaceColor);
+            CatArt.PaintBehind(this, graphics, Parent?.BackColor ?? SurfaceColor);
             graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             var bounds = new RectangleF(1F, 1F, Width - 2.5F, Height - 2.5F);
             using (var path = RoundedMenuRenderer.CreateRoundedPath(bounds, bounds.Height / 2F))
@@ -5224,7 +5229,7 @@ public sealed partial class Form1 : Form
         protected override void OnPaint(PaintEventArgs e)
         {
             var graphics = e.Graphics;
-            graphics.Clear(BackColor);
+            CatArt.PaintBehind(this, graphics, BackColor);
             var contentWidth = Math.Min(Width, MaxContentWidth);
             var origin = (Width - contentWidth) / 2;
             foreach (var (row, cellLeft, y, height, titleHeight, valueHeight) in
@@ -5240,14 +5245,18 @@ public sealed partial class Form1 : Form
                     graphics.FillEllipse(badgeBrush, badge);
                 }
 
+                var catDrawn = CatArt.TryDrawIcon(graphics, badge, row.Icon);
                 graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.Default;
-                TextRenderer.DrawText(
-                    graphics,
-                    row.Icon,
-                    IconFont,
-                    badge,
-                    row.IconColor,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                if (!catDrawn)
+                {
+                    TextRenderer.DrawText(
+                        graphics,
+                        row.Icon,
+                        IconFont,
+                        badge,
+                        row.IconColor,
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                }
                 var textTop = y + (ownHeight - titleHeight - valueHeight) / 2;
                 TextRenderer.DrawText(
                     graphics,
@@ -6562,7 +6571,7 @@ public sealed partial class Form1 : Form
         Add(right, "✏", Color.FromArgb(254, 243, 199), Color.FromArgb(217, 119, 6), "Ví dụ tiếng Anh", word.EnglishExample);
         Add(right, "🍀", Color.FromArgb(220, 252, 231), Color.FromArgb(22, 163, 74), "Ví dụ tiếng Việt", word.VietnameseExample);
         Add(bottom, "🌸", Color.FromArgb(252, 231, 243), Color.FromArgb(219, 39, 119), "Nghĩa tiếng Việt", word.Vietnamese);
-        Add(bottom, "🌍", Color.FromArgb(219, 234, 254), Color.FromArgb(37, 99, 235), "Nghĩa tiếng Anh", FormatEnglishMeaning(word.English));
+        Add(bottom, "🌍", Color.FromArgb(255, 228, 214), Color.FromArgb(234, 108, 70), "Nghĩa tiếng Anh", FormatEnglishMeaning(word.English));
         return (left, right, bottom);
     }
 
@@ -6645,7 +6654,7 @@ public sealed partial class Form1 : Form
         {
             ButtonKind.Primary => (Accent, AccentHover, AccentPressed, Color.White, AccentPressed),
             ButtonKind.Danger => (DangerSoft, DangerSoftHover, DangerSoftHover, DangerText, Color.FromArgb(248, 150, 150)),
-            _ => (AccentSoft, AccentSoftHover, AccentSoftHover, Accent, Color.FromArgb(147, 187, 250))
+            _ => (AccentSoft, AccentSoftHover, AccentSoftHover, Accent, Color.FromArgb(247, 178, 150))
         };
         // RoundedButton draws this as its outline so soft buttons stand out on light pages.
         button.FlatAppearance.BorderColor = border;

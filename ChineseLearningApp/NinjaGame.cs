@@ -3,7 +3,7 @@ using System.Drawing.Drawing2D;
 
 namespace ChineseLearningApp;
 
-// One word in the ninja game: its Chinese and pinyin, and the caller's own
+// One word in the bubble game: its Chinese and pinyin, and the caller's own
 // object (handed back when the word is hit or lands).
 internal sealed record GameWord(string Chinese, string Pinyin, object Tag);
 
@@ -15,9 +15,9 @@ internal enum NinjaGameMode
     Pinyin
 }
 
-// "Ninja phi tiêu": words fall through a night sky. Typing a falling word marks
-// it; the ninja runs under it and throws a spinning shuriken to cut it down
-// (+10 × combo). A word that lands on the roof costs one of three lives. Every
+// "Mèo bắn bong bóng": words float down through a night sky inside soap bubbles.
+// Typing a word marks it; the cat on the roof runs under it and fires a beam
+// from its mouth that pops the bubble (+10 × combo). A word that lands on the roof costs one of three lives. Every
 // 8 hits is a new level: faster and more words. Answers are always the Chinese
 // characters; when only characters are shown, their pinyin (no tones) counts too.
 internal sealed class NinjaGame : Panel
@@ -26,8 +26,6 @@ internal sealed class NinjaGame : Panel
     private const int HitsPerLevel = 8;
     private const float RoofHeight = 26;
 
-    // How fast a big meteor turns, in radians per second.
-    private const float HeadSpin = 1.6f;
     // Words further away than this (sideways) get a diagonal throw instead of a run.
     private const float DiagonalThrowDistance = 300;
 
@@ -59,7 +57,6 @@ internal sealed class NinjaGame : Panel
     private readonly List<Particle> _particles = [];
     private readonly List<FloatingText> _floats = [];
     private readonly List<Explosion> _explosions = [];
-    private readonly List<Crater> _craters = [];
     private readonly List<PointF> _stars = [];
     private readonly List<Snowflake> _snow = [];
     private readonly TextBox _input = new();
@@ -69,7 +66,6 @@ internal sealed class NinjaGame : Panel
     private double _spawnIn;
     private double _flash;
     private double _twinkle;
-    private double _shake;
 
     // 0 = pale crescent, 1 = full blood moon; eases towards the lives left.
     private double _bloodMoon;
@@ -82,9 +78,9 @@ internal sealed class NinjaGame : Panel
     private bool _prefixWaited;
     private string _composition = string.Empty;
 
-    // The ninja on the roof and the shurikens in flight.
+    // The cat on the roof and the beams in flight.
     private readonly Queue<FallingWord> _targets = new();
-    private readonly List<Shuriken> _shurikens = [];
+    private readonly List<Beam> _beams = [];
     private FallingWord? _aiming;
     private float _ninjaX = 200;
     private float _wanderTo = 200;
@@ -115,8 +111,8 @@ internal sealed class NinjaGame : Panel
     public const int MinTextScale = 50;
     public const int MaxTextScale = 200;
 
-    // Size of the falling words in percent, set in Settings. The meteors are built
-    // round the words, so their fire, trail, small meteors and blasts scale too.
+    // Size of the falling words in percent, set in Settings. The bubbles are built
+    // round the words, so they and their pops scale too.
     // Words already falling keep their size; the next ones use the new one.
     public int TextScale
     {
@@ -327,11 +323,9 @@ internal sealed class NinjaGame : Panel
         ClearWords();
         _particles.Clear();
         _explosions.Clear();
-        _craters.Clear();
-        _shake = 0;
         _floats.Clear();
         _targets.Clear();
-        _shurikens.Clear();
+        _beams.Clear();
         _aiming = null;
         _score = 0;
         _combo = 0;
@@ -388,11 +382,9 @@ internal sealed class NinjaGame : Panel
         ClearWords();
         _particles.Clear();
         _explosions.Clear();
-        _craters.Clear();
-        _shake = 0;
         _floats.Clear();
         _targets.Clear();
-        _shurikens.Clear();
+        _beams.Clear();
         _aiming = null;
         _gameOver = false;
         _startButton.Text = "▶  Bắt đầu chơi";
@@ -422,7 +414,7 @@ internal sealed class NinjaGame : Panel
         {
             var size = MeasureWord(word);
             var x = PickSpawnX(size, sky);
-            _words.Add(new FallingWord(word, x, -size.Height - 4, size, TextColors[_random.Next(TextColors.Length)]));
+            _words.Add(new FallingWord(word, x, -size.Height / 2 - BubbleRadii(size).Height - 2, size, TextColors[_random.Next(TextColors.Length)]));
             _spawnIn = Math.Max(0.8, 2.4 - Level * 0.22) * FallSeconds / DefaultFallSeconds;
         }
 
@@ -432,12 +424,12 @@ internal sealed class NinjaGame : Panel
         var speed = roofTop / FallSeconds * (34 + Level * 10) / 44;
         for (var index = _words.Count - 1; index >= 0; index--)
         {
-            // Answered words keep falling too; the shuriken homes in on them as they go.
+            // Answered words keep falling too; the beam homes in on them as they go.
             var falling = _words[index];
             falling.Y += (float)(speed * dt);
-            if (falling.Y + falling.Size.Height >= roofTop && falling.Targeted)
+            if (falling.CentreY + BubbleRadii(falling).Height >= roofTop && falling.Targeted)
             {
-                // Answered, but the shuriken is still on its way: the answer was right,
+                // Answered, but the beam is still on its way: the answer was right,
                 // so it blows up here as a hit rather than costing a life.
                 if (_aiming == falling)
                 {
@@ -446,18 +438,12 @@ internal sealed class NinjaGame : Panel
 
                 HitWord(falling);
             }
-            else if (falling.Y + falling.Size.Height >= roofTop)
+            else if (falling.CentreY + BubbleRadii(falling).Height >= roofTop)
             {
-                // Landed on the roof: it blows up and leaves a crater; lose a life and the combo.
+                // Landed on the roof: the bubble splashes; lose a life and the combo.
                 _words.RemoveAt(index);
                 falling.Image?.Dispose();
-                Explode(falling.CentreX, roofTop, MeteorRadius(falling) * 1.8f, ground: true);
-                ExplodeFragments(falling, ground: true);
-                _craters.Add(new Crater(falling.CentreX));
-                if (_craters.Count > 10)
-                {
-                    _craters.RemoveAt(0);
-                }
+                Pop(falling.CentreX, roofTop, BubbleRadii(falling), ground: true);
 
                 _lives--;
                 _combo = 0;
@@ -472,12 +458,12 @@ internal sealed class NinjaGame : Panel
         }
 
         UpdateNinja(dt, sky);
-        UpdateShurikens(dt);
+        UpdateBeams(dt);
         foreach (var particle in _particles)
         {
             particle.X += particle.Vx * (float)dt;
             particle.Y += particle.Vy * (float)dt;
-            particle.Vy += 260 * (float)dt;
+            particle.Vy += (particle.Bubble ? -20 : 260) * (float)dt;
             particle.Life -= (float)dt;
         }
 
@@ -488,12 +474,6 @@ internal sealed class NinjaGame : Panel
         }
 
         _explosions.RemoveAll(blast => blast.Age >= Explosion.Duration);
-        foreach (var crater in _craters)
-        {
-            crater.Age += dt;
-        }
-
-        _shake = Math.Max(0, _shake - dt);
         foreach (var text in _floats)
         {
             text.Y -= 40 * (float)dt;
@@ -630,7 +610,7 @@ internal sealed class NinjaGame : Panel
         };
     }
 
-    // Words all fall at one speed, so a new meteor only collides with ones still
+    // Words all fall at one speed, so a new bubble only collides with ones still
     // near the top: of a few random spots, take the one farthest from those.
     private float PickSpawnX(SizeF size, RectangleF sky)
     {
@@ -791,7 +771,7 @@ internal sealed class NinjaGame : Panel
             return;
         }
 
-        // Right answer: the ninja runs under the word and throws.
+        // Right answer: the cat runs under the word and fires.
         target.Targeted = true;
         _targets.Enqueue(target);
         _input.Clear();
@@ -799,7 +779,7 @@ internal sealed class NinjaGame : Panel
         Invalidate();
     }
 
-    // A shuriken reached its word: burst, points, and the word counts as right.
+    // A beam reached its bubble: pop, points, and the word counts as right.
     private void HitWord(FallingWord target)
     {
         _words.Remove(target);
@@ -809,16 +789,9 @@ internal sealed class NinjaGame : Panel
         var points = 10 * _combo;
         _score += points;
         var centre = new PointF(target.CentreX, target.CentreY);
-        Explode(centre.X, centre.Y, MeteorRadius(target) * 1.6f, ground: false);
-        ExplodeFragments(target, ground: false);
-        for (var index = 0; index < 12; index++)
-        {
-            var angle = _random.NextDouble() * Math.PI * 2;
-            var power = 80 + _random.NextDouble() * 180;
-            _particles.Add(new Particle(centre.X, centre.Y, (float)(Math.Cos(angle) * power), (float)(Math.Sin(angle) * power - 60), target.Color));
-        }
+        Pop(centre.X, centre.Y, BubbleRadii(target), ground: false);
 
-        _floats.Add(new FloatingText(_combo > 1 ? $"+{points}  🔥x{_combo}" : $"+{points}", centre.X, centre.Y, Color.FromArgb(253, 224, 71)));
+        _floats.Add(new FloatingText(_combo > 1 ? $"+{points}  ✨x{_combo}" : $"+{points}", centre.X, centre.Y, Color.FromArgb(253, 224, 71)));
         if (_hits % HitsPerLevel == 0)
         {
             _floats.Add(new FloatingText($"⭐ Lên cấp {Level}!", Width / 2f, Sky.Height / 2, Color.FromArgb(251, 146, 60)));
@@ -827,7 +800,7 @@ internal sealed class NinjaGame : Panel
         Hit?.Invoke(target.Word);
     }
 
-    // The ninja runs to the next marked word and throws once under it; with
+    // The cat runs to the next marked word and fires once under it; with
     // nothing to hit it patrols the roof.
     private void UpdateNinja(double dt, RectangleF sky)
     {
@@ -870,32 +843,32 @@ internal sealed class NinjaGame : Panel
 
         _throwPose = Math.Max(0, _throwPose - dt);
         // Close words: run underneath and throw straight up. Far words: turn
-        // and throw diagonally from where the ninja stands.
+        // and throw diagonally from where the cat stands.
         if (_aiming is not null &&
             (Math.Abs(_aiming.CentreX - _ninjaX) < 8 || Math.Abs(_aiming.CentreX - _ninjaX) > DiagonalThrowDistance))
         {
             _facing = Math.Sign(_aiming.CentreX - _ninjaX) is var side and not 0 ? side : _facing;
             _ninjaRunning = false;
-            _shurikens.Add(new Shuriken(_ninjaX, sky.Bottom - RoofHeight - 40, _aiming));
+            var mouth = Mouth(sky);
+            _beams.Add(new Beam(mouth.X, mouth.Y, _aiming));
             _aiming = null;
             _throwPose = 0.25;
         }
     }
 
-    // Shurikens spin and home in on their word; one that lost its word flies off the top.
-    private void UpdateShurikens(double dt)
+    // Beams home in on their bubble; one that lost its bubble flies off the top.
+    private void UpdateBeams(double dt)
     {
-        const float speed = 1000;
-        for (var index = _shurikens.Count - 1; index >= 0; index--)
+        const float speed = 1400;
+        for (var index = _beams.Count - 1; index >= 0; index--)
         {
-            var star = _shurikens[index];
-            star.Spin += (float)(dt * 900);
+            var beam = _beams[index];
             float dx;
             float dy;
-            if (_words.Contains(star.Target))
+            if (_words.Contains(beam.Target))
             {
-                dx = star.Target.CentreX - star.X;
-                dy = star.Target.CentreY - star.Y;
+                dx = beam.Target.CentreX - beam.X;
+                dy = beam.Target.CentreY - beam.Y;
             }
             else
             {
@@ -904,21 +877,21 @@ internal sealed class NinjaGame : Panel
             }
 
             var length = MathF.Max(0.001f, MathF.Sqrt(dx * dx + dy * dy));
-            // It blows up the moment the shuriken reaches the edge of the fireball.
-            if (_words.Contains(star.Target) && length < MeteorRadius(star.Target) * 1.15f)
+            // The bubble pops the moment the beam reaches its film.
+            if (_words.Contains(beam.Target) && length < HitRadius(beam.Target))
             {
-                _shurikens.RemoveAt(index);
-                HitWord(star.Target);
+                _beams.RemoveAt(index);
+                HitWord(beam.Target);
                 continue;
             }
 
-            star.Dx = dx / length;
-            star.Dy = dy / length;
-            star.X += star.Dx * speed * (float)dt;
-            star.Y += star.Dy * speed * (float)dt;
-            if (star.Y < -40)
+            beam.Dx = dx / length;
+            beam.Dy = dy / length;
+            beam.X += beam.Dx * speed * (float)dt;
+            beam.Y += beam.Dy * speed * (float)dt;
+            if (beam.Y < -40)
             {
-                _shurikens.RemoveAt(index);
+                _beams.RemoveAt(index);
             }
         }
     }
@@ -991,17 +964,10 @@ internal sealed class NinjaGame : Panel
                 }
             }
 
-            // A landing shakes the whole scene for a moment.
-            if (_shake > 0)
-            {
-                var amount = (float)(_shake * 22);
-                graphics.TranslateTransform(((float)_random.NextDouble() - 0.5f) * amount, ((float)_random.NextDouble() - 0.5f) * amount);
-            }
-
-            // Every meteor first, so no flame burns over another word.
+            // Bubbles first, then the words floating inside them.
             foreach (var falling in _words)
             {
-                DrawMeteor(graphics, falling);
+                DrawBubble(graphics, falling);
             }
 
             foreach (var falling in _words)
@@ -1009,22 +975,34 @@ internal sealed class NinjaGame : Panel
                 DrawWord(graphics, falling);
             }
 
-            foreach (var star in _shurikens)
+            foreach (var beam in _beams)
             {
-                DrawShuriken(graphics, star.X, star.Y, star.Spin, trailDx: star.Dx, trailDy: star.Dy);
+                DrawBeam(graphics, beam);
             }
 
             DrawRoof(graphics, sky);
-            DrawNinja(graphics, _ninjaX, sky.Bottom - RoofHeight + 4);
-            foreach (var blast in _explosions)
+            DrawCat(graphics, _ninjaX, sky.Bottom - RoofHeight + 4);
+            foreach (var pop in _explosions)
             {
-                DrawExplosion(graphics, blast);
+                DrawPop(graphics, pop);
             }
 
+            // Soapy droplets, and tiny bubbles drifting off.
             foreach (var particle in _particles)
             {
-                using var brush = new SolidBrush(Color.FromArgb((int)(255 * Math.Clamp(particle.Life / 0.7f, 0, 1)), particle.Color));
-                graphics.FillEllipse(brush, particle.X - 3, particle.Y - 3, 6, 6);
+                var alpha = (int)(255 * Math.Clamp(particle.Life / 0.7f, 0, 1));
+                if (particle.Bubble)
+                {
+                    using var ring = new Pen(Color.FromArgb(alpha * 3 / 4, 220, 240, 255), 1.4f);
+                    graphics.DrawEllipse(ring, particle.X - particle.Size / 2, particle.Y - particle.Size / 2, particle.Size, particle.Size);
+                    using var shine = new SolidBrush(Color.FromArgb(alpha, 255, 255, 255));
+                    graphics.FillEllipse(shine, particle.X - particle.Size / 4, particle.Y - particle.Size / 4, 2, 2);
+                }
+                else
+                {
+                    using var brush = new SolidBrush(Color.FromArgb(alpha, particle.Color));
+                    graphics.FillEllipse(brush, particle.X - 2.5f, particle.Y - 2.5f, 5, 5);
+                }
             }
 
             foreach (var text in _floats)
@@ -1035,7 +1013,7 @@ internal sealed class NinjaGame : Panel
                 graphics.DrawString(text.Text, FloatFont, brush, text.X - size.Width / 2f, text.Y - size.Height / 2f);
             }
 
-            // A red wash over everything in the sky: words, snow, roof and ninja.
+            // A red wash over everything in the sky: words, snow, roof and cat.
             if (blood > 0)
             {
                 using var wash = new SolidBrush(Color.FromArgb((int)(55 * blood), 220, 38, 38));
@@ -1094,7 +1072,7 @@ internal sealed class NinjaGame : Panel
     }
 
     // Plain glowing text, no frame: characters, characters over pinyin, or pinyin.
-    // A word already answered turns gold while the shuriken is on its way.
+    // A word already answered turns gold while the beam is on its way.
     private void DrawWord(Graphics graphics, FallingWord falling)
     {
         // The part typed so far turns red: leading characters, or the matching pinyin.
@@ -1128,7 +1106,7 @@ internal sealed class NinjaGame : Panel
     }
 
     // A transparent picture of the word: each line centred, with a dark outline all
-    // round so it reads on the fire, and its typed start redrawn in red.
+    // round so it reads on the bubble, and its typed start redrawn in red.
     private Bitmap RenderWord(FallingWord falling, int hanziTyped, int pinyinTyped)
     {
         var color = falling.Targeted ? Color.FromArgb(250, 204, 21) : falling.Color;
@@ -1177,341 +1155,6 @@ internal sealed class NinjaGame : Panel
         return image;
     }
 
-    // A blazing meteor: the word sits in a white-hot head with a molten orange edge,
-    // wrapped in a warm glow, dragging a sheaf of fiery blades and burning chips,
-    // with small meteors flying around it.
-    // A word already answered keeps falling and burning until the shuriken hits.
-    private void DrawMeteor(Graphics graphics, FallingWord falling)
-    {
-        var centreX = falling.CentreX;
-        var centreY = falling.CentreY;
-        var radius = MeteorRadius(falling);
-        var seed = falling.X * 0.37f;
-        var time = (float)_twinkle;
-        var length = 120 * SizeFactor + radius * 2.7f;
-
-        // Warm haze around the head.
-        DrawGlow(graphics, centreX, centreY, radius * 2.5f, Color.FromArgb(85, 249, 115, 22));
-
-        // The trail is a sheaf of sharp blades torn back off the head: long dark
-        // violet and red ones behind, orange in the middle and short bright yellow
-        // ones in front, each flickering in length. A solid orange body holds them.
-        DrawFlame(graphics, centreX, centreY, length * 0.55f, radius * 1.05f, seed + 2, time, Color.FromArgb(234, 88, 12), 220, wobble: 0.3f);
-        const int blades = 39;
-        for (var layer = 0; layer < 3; layer++)
-        {
-            for (var index = layer; index < blades; index += 3)
-            {
-                var hash = MathF.Abs(MathF.Sin(seed * 7.13f + index * 91.7f)) * 1000 % 1f;
-                var hash2 = MathF.Abs(MathF.Sin(seed * 3.71f + index * 47.3f)) * 1000 % 1f;
-                var angle = (hash - 0.5f) * 2.4f;
-                var flicker = 0.85f + 0.15f * MathF.Sin(time * 9 + index * 1.3f);
-                var (bladeLength, baseColor, tipColor, width) = layer switch
-                {
-                    0 => (length * (0.85f + 0.15f * hash2), Color.FromArgb(220, 38, 38), Color.FromArgb(49, 46, 129), radius * 0.32f),
-                    1 => (length * (0.6f + 0.2f * hash2), Color.FromArgb(249, 115, 22), Color.FromArgb(185, 28, 28), radius * 0.26f),
-                    _ => (length * (0.3f + 0.2f * hash2), Color.FromArgb(254, 240, 138), Color.FromArgb(251, 146, 60), radius * 0.2f)
-                };
-                // Every blade leans in towards one apex above the head, so together
-                // they make a cone: the further a blade reaches, the closer to the
-                // middle its tip ends.
-                var baseX = centreX + MathF.Sin(angle) * radius * 0.9f;
-                var apexX = centreX + (hash2 - 0.5f) * radius * 0.25f;
-                DrawBlade(graphics, baseX, centreY - MathF.Cos(angle) * radius * 0.5f,
-                    (apexX - baseX) / length, bladeLength * flicker, width * (0.6f + 0.6f * hash), baseColor, tipColor);
-            }
-        }
-
-        // Burning chips break off and tumble up along the trail.
-        for (var index = 0; index < 10; index++)
-        {
-            var hash = MathF.Abs(MathF.Sin(seed * 5.3f + index * 63.1f)) * 1000 % 1f;
-            var t = (time * (0.5f + 0.4f * hash) + hash * 3) % 1f;
-            var chipX = centreX + (hash - 0.5f) * radius * 3f * (0.6f + t) + MathF.Sin(time * 3 + index) * 4;
-            var chipY = centreY - radius * 0.8f - t * length;
-            var chip = 2 + 3 * hash;
-            var spin = time * 6 + index;
-            using var brush = new SolidBrush(Color.FromArgb((int)(230 * (1 - t)), index % 3 == 0 ? Color.FromArgb(253, 186, 116) : Color.FromArgb(68, 40, 30)));
-            graphics.FillPolygon(brush,
-            [
-                new PointF(chipX + MathF.Cos(spin) * chip, chipY + MathF.Sin(spin) * chip),
-                new PointF(chipX + MathF.Cos(spin + 2.2f) * chip * 0.7f, chipY + MathF.Sin(spin + 2.2f) * chip * 0.7f),
-                new PointF(chipX + MathF.Cos(spin + 4f) * chip, chipY + MathF.Sin(spin + 4f) * chip)
-            ]);
-        }
-
-        // Small meteors on the far side of their orbit pass behind the head.
-        foreach (var fragment in Fragments(falling).Where(fragment => !fragment.Front))
-        {
-            DrawFragment(graphics, fragment);
-        }
-
-        // The head: no smooth ball but a ragged blaze. A ring of red-orange flame
-        // licks out all round it, then the white-hot middle, whose hottest point is
-        // pushed up into the trail while its rough edge burns molten orange. Both
-        // outlines flicker, and their flames reach further on the upper side.
-        var headRadius = radius * 1.05f;
-        DrawGlow(graphics, centreX, centreY + radius * 0.15f, headRadius * 1.5f, Color.FromArgb(190, 249, 115, 22));
-        using (var outer = RaggedBlaze(centreX, centreY, headRadius * 1.22f, 0.75f, seed + 3, time))
-        using (var flame = new SolidBrush(Color.FromArgb(235, 234, 88, 12)))
-        {
-            graphics.FillPath(flame, outer);
-        }
-
-        using var headPath = RaggedBlaze(centreX, centreY, headRadius, 0.4f, seed, time);
-        using var burn = new PathGradientBrush(headPath)
-        {
-            CenterPoint = new PointF(centreX, centreY - headRadius * 0.45f),
-            CenterColor = Color.FromArgb(255, 253, 245),
-            SurroundColors = [Color.FromArgb(245, 251, 146, 60)],
-            FocusScales = new PointF(0.55f, 0.55f)
-        };
-        graphics.FillPath(burn, headPath);
-
-        // Licks of orange flame rise through the white-hot middle from its lower edge,
-        // drifting from side to side as the blaze turns.
-        for (var lick = 0; lick < 3; lick++)
-        {
-            var drift = MathF.Sin(time * HeadSpin + lick * 2.1f + seed) * radius * 0.45f;
-            DrawFlame(graphics, centreX + drift, centreY + radius * 0.55f, radius * (1.1f + 0.2f * lick), radius * 0.22f,
-                seed + 11 + lick, time, Color.FromArgb(234, 88, 12), 170, wobble: 0.8f);
-        }
-
-        // ...and in front of it on the near side.
-        foreach (var fragment in Fragments(falling).Where(fragment => fragment.Front))
-        {
-            DrawFragment(graphics, fragment);
-        }
-    }
-
-    // A rough, flickering outline of flame round a centre: points alternate between
-    // hollows on the rim and tongue tips. Every tongue is swept up towards the trail,
-    // as if the fall blows the fire back: its tip rises and leans in towards the
-    // middle. Tongues waver with time and are longest on the sides and top,
-    // shortest on the leading (lower) edge.
-    private static GraphicsPath RaggedBlaze(float centreX, float centreY, float radius, float roughness, float seed, float time)
-    {
-        const int points = 36;
-        var outline = new PointF[points];
-        for (var index = 0; index < points; index++)
-        {
-            // The whole pattern turns with time, so the blaze spins as it falls.
-            var angle = index * MathF.PI * 2 / points + time * HeadSpin;
-            var cos = MathF.Cos(angle);
-            var sin = MathF.Sin(angle);
-            var hash = MathF.Abs(MathF.Sin(seed * 9.1f + index * 37.7f)) * 1000 % 1f;
-            var wave = 1 + 0.04f * MathF.Sin(angle * 3 + time * 7 + seed);
-            if (index % 2 == 1)
-            {
-                var hollow = radius * (1 - roughness * (0.2f + 0.3f * hash)) * wave;
-                outline[index] = new PointF(centreX + cos * hollow, centreY + sin * hollow);
-                continue;
-            }
-
-            var down = MathF.Max(0, sin);
-            var flicker = 0.65f + 0.35f * MathF.Sin(time * 11 + index * 1.9f + seed);
-            var tongue = radius * roughness * (0.5f + 1.3f * hash) * flicker * (1.3f - 1.05f * down) * 2.2f;
-            var baseX = centreX + cos * radius * wave;
-            var baseY = centreY + sin * radius * wave;
-            // Tips lean in towards the middle as they rise, so the blaze closes up
-            // into the trail like a flame.
-            outline[index] = new PointF(baseX - cos * tongue * 0.4f, baseY - tongue);
-        }
-
-        // A low-tension curve keeps the tongues pointed but softens them like fire.
-        // Winding fill keeps tongues that cross their neighbours solid.
-        var path = new GraphicsPath(FillMode.Winding);
-        path.AddClosedCurve(outline, 0.3f);
-        return path;
-    }
-
-    // A small meteor in orbit: where it is, how big, which way it is heading (a unit
-    // vector), whether it is on the near side of the word, and how bright it still
-    // is (1 just broken off, 0 burnt out).
-    private readonly record struct Fragment(float X, float Y, float Size, float Dx, float Dy, bool Front, float Glow);
-
-    // Small meteors keep breaking off the big one. Each starts at the edge of the
-    // blaze and circles the word on its own tilted oval (sweeping left to right on
-    // the near side, passing behind on the far side) while it slowly falls back
-    // along the trail, its circle narrowing with the cone of fire, shrinking and
-    // fading until it burns out; then another breaks off in its place. Those still
-    // burning share the word's fate: they blow up with it, or crash with it.
-    private IEnumerable<Fragment> Fragments(FallingWord falling)
-    {
-        var radius = MeteorRadius(falling);
-        var seed = falling.X * 0.37f;
-        var time = (float)_twinkle;
-        var count = 9 + (int)(seed * 10) % 4;
-        for (var index = 0; index < count; index++)
-        {
-            var hash = MathF.Abs(MathF.Sin(seed * 12.9898f + index * 78.233f)) * 43758.5453f % 1f;
-            var hash2 = MathF.Abs(MathF.Sin(seed * 39.3468f + index * 11.135f)) * 24634.6345f % 1f;
-            // How far through its life this one is: each lasts about 2–4 seconds,
-            // and they are staggered so some are always breaking off.
-            var life = (time / (2f + 2f * hash) + index / (float)count + hash2) % 1f;
-            // Out to its orbit just after breaking off, then in again as it drops back
-            // up the narrowing trail, which it has nearly reached the end of when it dies.
-            var spread = (0.7f + 0.5f * MathF.Sqrt(life)) * (1 - 0.6f * life);
-            var across = radius * (1.4f + 1.4f * hash2) * spread;
-            var depth = radius * (0.35f + 0.35f * hash) * spread;
-            var tilt = (hash - 0.5f) * 0.6f;
-            var trail = 120 * SizeFactor + radius * 2.7f;
-            var lift = radius * (0.2f + 0.6f * hash2) + life * life * trail * 0.85f;
-            var spin = 1.1f + 0.9f * hash;
-            // The angle runs backwards so the near (lower) half moves left to right.
-            var angle = -time * spin + index * 2.399f + seed;
-            var cos = MathF.Cos(angle);
-            var sin = MathF.Sin(angle);
-            var x = falling.CentreX + cos * across;
-            var y = falling.CentreY - lift + sin * depth + cos * across * tilt;
-            var dx = sin * across;
-            var dy = -cos * depth + sin * across * tilt;
-            var speed = MathF.Max(0.001f, MathF.Sqrt(dx * dx + dy * dy));
-            // Flares up as it breaks off, then dims and shrinks away.
-            var glow = Math.Min(1, life * 8) * (1 - life * life);
-            var size = (2f + 2.6f * hash) * SizeFactor * (sin > 0 ? 1 : 0.75f) * (1 - 0.5f * life);
-            yield return new Fragment(x, y, size, dx / speed, dy / speed, sin > 0, glow);
-        }
-    }
-
-    // Every small meteor still burning bursts in its own small blast.
-    private void ExplodeFragments(FallingWord falling, bool ground)
-    {
-        foreach (var (x, flyingY, size, _, _, _, glow) in Fragments(falling))
-        {
-            if (glow < 0.15f)
-            {
-                continue;
-            }
-
-            // On a crash they come down on the roof alongside the big one.
-            var y = ground ? Sky.Bottom - RoofHeight : flyingY;
-            _explosions.Add(new Explosion(x, y, size * 5, ground));
-            for (var index = 0; index < 4; index++)
-            {
-                var angle = _random.NextDouble() * Math.PI * 2;
-                var power = 60 + _random.NextDouble() * 140;
-                _particles.Add(new Particle(x, y, (float)(Math.Cos(angle) * power), (float)(Math.Sin(angle) * power - 40), Color.FromArgb(251, 146, 60)));
-            }
-        }
-    }
-
-    // One blade of the trail: a long thin needle from the head up to a sharp tip,
-    // leaning by `lean` (sideways per unit up), shading from its base colour to its
-    // tip colour. It narrows fast and then runs out into a long fine point, which
-    // stays visible right to the end so the tip reads sharp.
-    private static void DrawBlade(Graphics graphics, float x, float y, float lean, float length, float width, Color baseColor, Color tipColor)
-    {
-        var tip = new PointF(x + lean * length, y - length);
-        var dx = tip.X - x;
-        var dy = tip.Y - y;
-        var size = MathF.Max(0.001f, MathF.Sqrt(dx * dx + dy * dy));
-        var normal = new PointF(-dy / size * width / 2, dx / size * width / 2);
-        PointF Along(float t, float side, float scale) => new(x + dx * t + side * normal.X * scale, y + dy * t + side * normal.Y * scale);
-        PointF[] blade =
-        [
-            Along(0, -1, 1),
-            Along(0.15f, -1, 0.85f),
-            Along(0.5f, -1, 0.3f),
-            tip,
-            Along(0.5f, 1, 0.3f),
-            Along(0.15f, 1, 0.85f),
-            Along(0, 1, 1)
-        ];
-        using var brush = new LinearGradientBrush(new PointF(x, y + 1), tip, baseColor, tipColor)
-        {
-            InterpolationColors = new ColorBlend
-            {
-                Colors = [Color.FromArgb(245, baseColor), Color.FromArgb(225, tipColor), Color.FromArgb(110, tipColor)],
-                Positions = [0f, 0.7f, 1f]
-            }
-        };
-        graphics.FillPolygon(brush, blade);
-    }
-
-    // One small meteor: a white-hot head in a warm glow, trailing a thin yellow streak
-    // straight up, like the big one's, whichever way it is flying round;
-    // the streak fades to orange and then to nothing.
-    private static void DrawFragment(Graphics graphics, Fragment fragment)
-    {
-        var (x, y, size, _, _, _, glow) = fragment;
-        if (glow < 0.02f)
-        {
-            return;
-        }
-
-        int Fade(int alpha) => (int)(alpha * glow);
-        var length = size * 9 + 16;
-        var backX = 0f;
-        var backY = -1f;
-        var back = MathF.Max(0.001f, MathF.Sqrt(backX * backX + backY * backY));
-        var tail = new PointF(x + backX / back * length, y + backY / back * length);
-        var normal = new PointF(-backY / back * size * 0.9f, backX / back * size * 0.9f);
-        using (var streak = new GraphicsPath())
-        {
-            streak.AddPolygon([new PointF(x - normal.X, y - normal.Y), tail, new PointF(x + normal.X, y + normal.Y)]);
-            using var brush = new LinearGradientBrush(tail, new PointF(x + backX / back * -1, y + backY / back * -1), Color.White, Color.White)
-            {
-                InterpolationColors = new ColorBlend
-                {
-                    Colors = [Color.FromArgb(0, 249, 115, 22), Color.FromArgb(Fade(150), 253, 224, 71), Color.FromArgb(Fade(235), 255, 251, 220)],
-                    Positions = [0f, 0.6f, 1f]
-                }
-            };
-            graphics.FillPath(brush, streak);
-        }
-
-        FireDisc(graphics, x, y, size * 3, Color.FromArgb(Fade(150), 251, 191, 36));
-        using var head = new SolidBrush(Color.FromArgb(Fade(255), 255, 252, 240));
-        graphics.FillEllipse(head, x - size, y - size, size * 2, size * 2);
-    }
-
-    // Big enough for the fire to hold the whole word.
-    private static float MeteorRadius(FallingWord falling) =>
-        Math.Max(falling.Size.Width, falling.Size.Height) / 2 + 8;
-
-    // A blast: debris and fire flung out, plus the expanding fireball and shockwave.
-    // On the ground it also throws up debris and shakes the screen.
-    private void Explode(float x, float y, float size, bool ground)
-    {
-        _explosions.Add(new Explosion(x, y, size, ground));
-        Color[] fire = [Color.FromArgb(253, 224, 71), Color.FromArgb(251, 146, 60), Color.FromArgb(239, 68, 68)];
-        for (var index = 0; index < (ground ? 34 : 26); index++)
-        {
-            var angle = ground ? Math.PI + _random.NextDouble() * Math.PI : _random.NextDouble() * Math.PI * 2;
-            var power = 120 + _random.NextDouble() * 260;
-            var color = ground && index % 3 == 0 ? Color.FromArgb(87, 60, 46) : fire[_random.Next(fire.Length)];
-            _particles.Add(new Particle(x, y, (float)(Math.Cos(angle) * power), (float)(Math.Sin(angle) * power - 40), color));
-        }
-
-        if (ground)
-        {
-            _shake = 0.4;
-        }
-    }
-
-    private void DrawExplosion(Graphics graphics, Explosion blast)
-    {
-        var t = (float)(blast.Age / Explosion.Duration);
-        var grow = 1 - (1 - t) * (1 - t);
-        var radius = blast.Size * (0.35f + 0.65f * grow);
-        var fade = 1 - t;
-
-        var ring = blast.Size * (0.4f + 1.1f * grow);
-        using (var wave = new Pen(Color.FromArgb((int)(200 * fade), 254, 215, 170), 5 * fade + 1))
-        {
-            graphics.DrawEllipse(wave, blast.X - ring, blast.Y - ring * (blast.Ground ? 0.45f : 1), ring * 2, ring * (blast.Ground ? 0.9f : 2));
-        }
-
-        // Fireball: red glow outside, then orange, yellow and a white-hot core that
-        // burns out first.
-        FireDisc(graphics, blast.X, blast.Y, radius, Color.FromArgb((int)(190 * fade), 239, 68, 68));
-        FireDisc(graphics, blast.X, blast.Y, radius * 0.72f, Color.FromArgb((int)(230 * fade), 249, 115, 22));
-        FireDisc(graphics, blast.X, blast.Y, radius * 0.45f, Color.FromArgb((int)(255 * fade), 253, 224, 71));
-        FireDisc(graphics, blast.X, blast.Y, radius * 0.25f, Color.FromArgb((int)(255 * fade * fade), 255, 255, 240));
-    }
-
-    // A soft disc: solid in the middle, fading to nothing at its edge.
     // The sky's gradient fill, kept as a picture and only redrawn when the size
     // changes or the blood moon has moved on a step (1/50 of the way).
     private Bitmap? _skyBackdrop;
@@ -1538,130 +1181,6 @@ internal sealed class NinjaGame : Panel
             LinearGradientMode.Vertical);
         graphics.FillPath(gradient, skyPath);
         return _skyBackdrop;
-    }
-
-    // A steady glow (a meteor's haze) drawn from a picture made once per size and
-    // colour: copying a premultiplied picture unscaled is by far the cheapest way
-    // GDI+ has to put a soft gradient on screen every frame.
-    private static readonly Dictionary<(int Radius, int Color), Bitmap> GlowCache = [];
-
-    private static void DrawGlow(Graphics graphics, float x, float y, float radius, Color color)
-    {
-        var size = Math.Max(1, (int)radius);
-        if (!GlowCache.TryGetValue((size, color.ToArgb()), out var glow))
-        {
-            glow = new Bitmap(size * 2, size * 2, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
-            using (var glowGraphics = Graphics.FromImage(glow))
-            {
-                glowGraphics.SmoothingMode = SmoothingMode.AntiAlias;
-                FireDisc(glowGraphics, size, size, size, color);
-            }
-
-            GlowCache[(size, color.ToArgb())] = glow;
-        }
-
-        graphics.DrawImageUnscaled(glow, (int)(x - size), (int)(y - size));
-    }
-
-    private static void FireDisc(Graphics graphics, float x, float y, float radius, Color color)
-    {
-        if (color.A == 0 || radius < 1)
-        {
-            return;
-        }
-
-        var bounds = new RectangleF(x - radius, y - radius, radius * 2, radius * 2);
-        using var path = new GraphicsPath();
-        path.AddEllipse(bounds);
-        using var brush = new PathGradientBrush(path)
-        {
-            CenterColor = color,
-            SurroundColors = [Color.FromArgb(0, color)],
-            FocusScales = new PointF(0.45f, 0.45f)
-        };
-        graphics.FillEllipse(brush, bounds);
-    }
-
-    // One flame layer: a teardrop whose round bottom wraps under the word and whose
-    // sides taper up to a tip, rippling with time so the fire licks and flickers.
-    // Solid around the word, fading out towards the tip.
-    // `wobble` scales how much it ripples and sways: 1 for licking flames, less for
-    // a smoother trail. `jagged` (0–1) cuts the sides into sawtooth barbs: each tooth
-    // ramps from inside out and up to a sharp point, then snaps back in, so the fire
-    // looks swept back. The teeth climb the trail with time and grow towards the tip.
-    private static void DrawFlame(Graphics graphics, float centreX, float head, float length, float half, float seed, float time, Color color, int alpha, float wobble = 1, float jagged = 0)
-    {
-        PointF Edge(float t, float side, float scale)
-        {
-            var ripple = 1 + 0.2f * wobble * MathF.Sqrt(t) * MathF.Sin(t * 10 - time * 11 + seed);
-            var width = half * MathF.Pow(1 - t, 0.8f) * ripple * scale;
-            var sway = MathF.Sin(t * 5 - time * 7 + seed) * half * 0.3f * wobble * t;
-            return new PointF(centreX + sway + side * width, head - t * length);
-        }
-
-        PointF[] Side(float side)
-        {
-            if (jagged <= 0)
-            {
-                return Enumerable.Range(0, 17).Select(step => Edge(step / 16f, side, 1)).ToArray();
-            }
-
-            // Inner base, then the barb's tip further out and further up, then straight
-            // back in at the tip's height for the next tooth to start from.
-            const int teeth = 11;
-            var phase = (time * 1.3f + (side < 0 ? 0 : 0.5f)) % 1f;
-            var points = new List<PointF> { Edge(0, side, 1) };
-            for (var tooth = -1; tooth < teeth; tooth++)
-            {
-                var start = (tooth + phase) / teeth;
-                var end = (tooth + 1 + phase) / teeth;
-                if (end <= 0)
-                {
-                    continue;
-                }
-
-                var depth = jagged * MathF.Pow(Math.Clamp(end, 0, 1), 0.5f) * (0.7f + 0.3f * MathF.Abs(MathF.Sin(tooth * 2.3f + seed)));
-                points.Add(Edge(Math.Clamp(start, 0, 1), side, 1 - depth));
-                points.Add(Edge(Math.Min(end, 1), side, 1 + depth * 0.35f));
-                if (end >= 1)
-                {
-                    break;
-                }
-
-                points.Add(Edge(end, side, 1 - depth));
-            }
-
-            return points.ToArray();
-        }
-
-        using var flame = new GraphicsPath();
-        var left = Side(-1);
-        var right = Side(1);
-        if (jagged > 0)
-        {
-            flame.AddLines(left);
-            flame.AddLines(right.Reverse().ToArray());
-        }
-        else
-        {
-            flame.AddCurve(left);
-            flame.AddCurve(right.Reverse().ToArray());
-        }
-
-        flame.AddArc(centreX - half, head - half, half * 2, half * 2, 0, 180);
-        flame.CloseFigure();
-
-        var total = length + half;
-        var bounds = new RectangleF(centreX - half * 2, head - length - 1, half * 4, total + 2);
-        using var fade = new LinearGradientBrush(bounds, color, color, LinearGradientMode.Vertical)
-        {
-            InterpolationColors = new ColorBlend
-            {
-                Colors = [Color.FromArgb(0, color), Color.FromArgb(alpha * 3 / 4, color), Color.FromArgb(alpha, color), Color.FromArgb(alpha, color)],
-                Positions = [0f, 0.4f * length / total, length / total, 1f]
-            }
-        };
-        graphics.FillPath(fade, flame);
     }
 
     // How many leading characters of the word the typed text matches.
@@ -1742,153 +1261,295 @@ internal sealed class NinjaGame : Panel
         {
             graphics.DrawArc(tile, x, top + 4, 28, 16, 0, 180);
         }
-
-        // Craters where meteors struck: a dark bowl sunk into the roof with rubble
-        // on its lips, glowing hot for a few seconds after the impact.
-        foreach (var crater in _craters)
-        {
-            var bowl = new RectangleF(crater.X - 34, top - 8, 68, 24);
-            var state = graphics.Save();
-            graphics.SetClip(new RectangleF(bowl.X - 2, top, bowl.Width + 4, RoofHeight));
-            using (var path = new GraphicsPath())
-            {
-                path.AddEllipse(bowl);
-                using var dark = new PathGradientBrush(path)
-                {
-                    CenterPoint = new PointF(crater.X, top + 6),
-                    CenterColor = Color.FromArgb(10, 8, 8),
-                    SurroundColors = [Color.FromArgb(51, 41, 46)]
-                };
-                graphics.FillEllipse(dark, bowl);
-            }
-
-            var heat = Math.Clamp(1 - crater.Age / 3, 0, 1);
-            if (heat > 0)
-            {
-                using var embers = new SolidBrush(Color.FromArgb((int)(200 * heat), 249, 115, 22));
-                graphics.FillEllipse(embers, crater.X - 18, top + 1, 36, 9);
-            }
-
-            graphics.Restore(state);
-            using var rubble = new SolidBrush(Color.FromArgb(71, 85, 105));
-            graphics.FillEllipse(rubble, crater.X - 44, top - 4, 16, 8);
-            graphics.FillEllipse(rubble, crater.X + 28, top - 3, 15, 7);
-            graphics.FillEllipse(rubble, crater.X - 30, top - 6, 7, 5);
-        }
     }
 
-    // A small ninja in black with a red headband; legs swing while running and
-    // the throwing arm snaps forward just after a throw.
-    private void DrawNinja(Graphics graphics, float x, float feetY)
+    // A soap bubble round the word: slightly oval for long words, big enough for
+    // the whole word to float inside it.
+    private static SizeF BubbleRadii(FallingWord falling) => BubbleRadii(falling.Size);
+
+    private static SizeF BubbleRadii(SizeF word)
     {
-        var swing = _ninjaRunning ? (float)Math.Sin(_runPhase) * 8 : 0;
-        var bob = _ninjaRunning ? Math.Abs((float)Math.Sin(_runPhase)) * 2 : 0;
-        var hipY = feetY - 16 - bob;
-        var suit = Color.FromArgb(17, 24, 39);
-        var red = Color.FromArgb(220, 38, 38);
-
-        using (var shadow = new SolidBrush(Color.FromArgb(70, 0, 0, 0)))
-        {
-            graphics.FillEllipse(shadow, x - 12, feetY - 3, 24, 6);
-        }
-
-        using (var leg = new Pen(suit, 4) { StartCap = LineCap.Round, EndCap = LineCap.Round })
-        {
-            graphics.DrawLine(leg, x - 3, hipY, x - 7 + swing, feetY);
-            graphics.DrawLine(leg, x + 3, hipY, x + 7 - swing, feetY);
-        }
-
-        using (var body = new SolidBrush(suit))
-        using (var bodyPath = Form1.RoundedMenuRenderer.CreateRoundedPath(new RectangleF(x - 7, hipY - 19, 14, 21), 6))
-        {
-            graphics.FillPath(body, bodyPath);
-        }
-
-        using (var belt = new SolidBrush(red))
-        {
-            graphics.FillRectangle(belt, x - 7, hipY - 4, 14, 3);
-        }
-
-        // Arms: one forward (throwing), one back.
-        var throwReach = _throwPose > 0 ? 14 : 9;
-        using (var arm = new Pen(suit, 3.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
-        {
-            graphics.DrawLine(arm, x + _facing * 4, hipY - 15, x + _facing * throwReach, hipY - (_throwPose > 0 ? 30 : 10));
-            graphics.DrawLine(arm, x - _facing * 4, hipY - 15, x - _facing * 9, hipY - 8);
-        }
-
-        // Head with an eye slit and a red headband whose tails flutter.
-        var head = new RectangleF(x - 8, hipY - 35, 16, 16);
-        using (var hood = new SolidBrush(suit))
-        {
-            graphics.FillEllipse(hood, head);
-        }
-
-        using (var slit = new SolidBrush(Color.FromArgb(253, 224, 186)))
-        {
-            graphics.FillRectangle(slit, x - 6 + _facing * 1, head.Top + 6, 12, 4);
-        }
-
-        using (var eye = new SolidBrush(suit))
-        {
-            graphics.FillEllipse(eye, x - 3 + _facing * 2, head.Top + 6.5f, 2.5f, 2.5f);
-            graphics.FillEllipse(eye, x + 2 + _facing * 2, head.Top + 6.5f, 2.5f, 2.5f);
-        }
-
-        using (var band = new SolidBrush(red))
-        {
-            graphics.FillRectangle(band, x - 8, head.Top + 3, 16, 3);
-        }
-
-        var flutter = (float)Math.Sin(_runPhase * 1.3) * 3;
-        using (var tails = new Pen(red, 2.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
-        {
-            graphics.DrawLine(tails, x - _facing * 8, head.Top + 4, x - _facing * 18, head.Top + 2 + flutter);
-            graphics.DrawLine(tails, x - _facing * 8, head.Top + 5, x - _facing * 16, head.Top + 9 - flutter);
-        }
-
-        // A shuriken ready in hand when not mid-throw.
-        if (_throwPose <= 0)
-        {
-            DrawShuriken(graphics, x + _facing * 10, hipY - 12, (float)(_runPhase * 40), 0, 0, small: true);
-        }
+        var across = word.Width / 2 * 1.18f + 14;
+        var down = Math.Max(word.Height / 2 * 1.18f + 14, across * 0.72f);
+        return new SizeF(Math.Max(across, down * 0.92f), down);
     }
 
-    // A four-pointed throwing star, spun by angle, with a faint streak when flying.
-    private static void DrawShuriken(Graphics graphics, float x, float y, float angle, float trailDx, float trailDy, bool small = false)
+    // How close the beam must get to pop the bubble.
+    private static float HitRadius(FallingWord falling)
     {
-        var scale = small ? 0.55f : 1f;
-        if (trailDx != 0 || trailDy != 0)
+        var radii = BubbleRadii(falling);
+        return Math.Min(radii.Width, radii.Height) * 1.05f;
+    }
+
+    // The bubble itself never changes, so each size is drawn once into a picture:
+    // a clear film tinted blue towards its edge, a rainbow rim, a faint pink sheen
+    // and white window reflections.
+    private static readonly Dictionary<(int Across, int Down), Bitmap> BubbleCache = [];
+
+    private static Bitmap BubbleImage(int across, int down)
+    {
+        if (BubbleCache.TryGetValue((across, down), out var cached))
         {
-            var start = new PointF(x - trailDx * 60, y - trailDy * 60);
-            using var fade = new LinearGradientBrush(start, new PointF(x, y), Color.FromArgb(0, 148, 163, 184), Color.FromArgb(160, 226, 232, 240));
-            using var streak = new Pen(fade, 4) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-            graphics.DrawLine(streak, start, new PointF(x, y));
+            return cached;
         }
 
+        var image = new Bitmap(across * 2 + 8, down * 2 + 8, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+        using var graphics = Graphics.FromImage(image);
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        var body = new RectangleF(4, 4, across * 2, down * 2);
+        using (var path = new GraphicsPath())
+        {
+            path.AddEllipse(body);
+            using var film = new PathGradientBrush(path)
+            {
+                CenterColor = Color.FromArgb(12, 220, 240, 255),
+                SurroundColors = [Color.FromArgb(100, 165, 215, 255)],
+                FocusScales = new PointF(0.7f, 0.7f)
+            };
+            graphics.FillPath(film, path);
+        }
+
+        using (var sheen = new LinearGradientBrush(body, Color.FromArgb(0, 255, 255, 255), Color.FromArgb(60, 255, 150, 215), 45f))
+        {
+            graphics.FillEllipse(sheen, body);
+        }
+
+        using (var rainbow = new LinearGradientBrush(body, Color.White, Color.White, 45f)
+               {
+                   InterpolationColors = new ColorBlend
+                   {
+                       Colors =
+                       [
+                           Color.FromArgb(215, 255, 140, 200), Color.FromArgb(215, 255, 230, 120),
+                           Color.FromArgb(215, 120, 230, 255), Color.FromArgb(215, 185, 140, 255)
+                       ],
+                       Positions = [0f, 0.35f, 0.7f, 1f]
+                   }
+               })
+        using (var rim = new Pen(rainbow, 2.6f))
+        {
+            graphics.DrawEllipse(rim, body);
+        }
+
+        using (var inner = new Pen(Color.FromArgb(70, 255, 255, 255), 1.2f))
+        {
+            graphics.DrawEllipse(inner, RectangleF.Inflate(body, -4, -4));
+        }
+
+        // A window-shaped shine at the top left, a dot under it, and a thin glint
+        // along the bottom right.
         var state = graphics.Save();
-        graphics.TranslateTransform(x, y);
-        graphics.RotateTransform(angle);
-        graphics.ScaleTransform(scale, scale);
-        var points = new PointF[8];
-        for (var index = 0; index < 8; index++)
+        graphics.TranslateTransform(4 + across * 0.55f, 4 + down * 0.42f);
+        graphics.RotateTransform(-38);
+        using (var shine = new SolidBrush(Color.FromArgb(190, 255, 255, 255)))
         {
-            var radius = index % 2 == 0 ? 13f : 4.5f;
-            var a = index * Math.PI / 4;
-            points[index] = new PointF((float)(Math.Cos(a) * radius), (float)(Math.Sin(a) * radius));
-        }
-
-        using (var steel = new LinearGradientBrush(new RectangleF(-13, -13, 26, 26), Color.FromArgb(241, 245, 249), Color.FromArgb(100, 116, 139), 45f))
-        {
-            graphics.FillPolygon(steel, points);
-        }
-
-        using (var hole = new SolidBrush(Color.FromArgb(30, 41, 59)))
-        {
-            graphics.FillEllipse(hole, -2.5f, -2.5f, 5, 5);
+            graphics.FillEllipse(shine, -across * 0.24f, -down * 0.09f, across * 0.48f, down * 0.18f);
         }
 
         graphics.Restore(state);
+        using (var dot = new SolidBrush(Color.FromArgb(200, 255, 255, 255)))
+        {
+            var size = Math.Max(3f, across * 0.09f);
+            graphics.FillEllipse(dot, 4 + across * 0.3f, 4 + down * 0.66f, size, size);
+        }
+
+        using (var glint = new Pen(Color.FromArgb(120, 255, 255, 255), 2.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+        {
+            graphics.DrawArc(glint, RectangleF.Inflate(body, -6, -6), 15, 50);
+        }
+
+        BubbleCache[(across, down)] = image;
+        return image;
+    }
+
+    // A word's bubble, with a sparkle running round its rim. A bubble the beam is
+    // on its way to glows pink.
+    private void DrawBubble(Graphics graphics, FallingWord falling)
+    {
+        var radii = BubbleRadii(falling);
+        var across = (int)radii.Width;
+        var down = (int)radii.Height;
+        var centreX = falling.CentreX;
+        var centreY = falling.CentreY;
+        graphics.DrawImageUnscaled(BubbleImage(across, down), (int)centreX - across - 4, (int)centreY - down - 4);
+        var body = new RectangleF((int)centreX - across, (int)centreY - down, across * 2, down * 2);
+        using (var sparkle = new Pen(Color.FromArgb(110, 255, 255, 255), 2f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+        {
+            graphics.DrawArc(sparkle, body, (float)(_twinkle * 70 + falling.X) % 360, 24);
+        }
+
+        if (falling.Targeted)
+        {
+            using var locked = new Pen(Color.FromArgb(170, 255, 120, 200), 3f);
+            graphics.DrawEllipse(locked, RectangleF.Inflate(body, 3, 3));
+        }
+    }
+
+    private static readonly Color[] FoamColors =
+    [
+        Color.FromArgb(200, 238, 255), Color.FromArgb(255, 186, 222), Color.FromArgb(255, 240, 165),
+        Color.FromArgb(214, 196, 255), Color.White
+    ];
+
+    // A bubble bursting: soapy droplets spray out from its rim and a few tiny
+    // bubbles float off. One that reached the roof splashes upwards instead.
+    private void Pop(float x, float y, SizeF radii, bool ground)
+    {
+        _explosions.Add(new Explosion(x, y, Math.Max(radii.Width, radii.Height), ground));
+        for (var index = 0; index < (ground ? 22 : 20); index++)
+        {
+            var angle = ground ? Math.PI + _random.NextDouble() * Math.PI : _random.NextDouble() * Math.PI * 2;
+            var power = 90 + _random.NextDouble() * 220;
+            var startX = ground ? x + (float)(Math.Cos(angle) * radii.Width * 0.6) : x + (float)Math.Cos(angle) * radii.Width;
+            var startY = ground ? y : y + (float)Math.Sin(angle) * radii.Height;
+            _particles.Add(new Particle(startX, startY, (float)(Math.Cos(angle) * power), (float)(Math.Sin(angle) * power - 40),
+                FoamColors[_random.Next(FoamColors.Length)]));
+        }
+
+        for (var index = 0; index < 6; index++)
+        {
+            var angle = _random.NextDouble() * Math.PI * 2;
+            _particles.Add(new Particle(
+                x + (float)Math.Cos(angle) * radii.Width * 0.5f,
+                y + (float)Math.Sin(angle) * radii.Height * 0.5f,
+                (float)(Math.Cos(angle) * 50),
+                -30 - (float)_random.NextDouble() * 50,
+                Color.White)
+            {
+                Bubble = true,
+                Size = 5 + (float)_random.NextDouble() * 7,
+                Life = 1.3f
+            });
+        }
+    }
+
+    // The burst itself: the film tears into curling rainbow shreds that fly apart
+    // and vanish, after a quick white flash. On the roof it leaves a flat ripple.
+    private void DrawPop(Graphics graphics, Explosion pop)
+    {
+        var t = (float)(pop.Age / Explosion.Duration);
+        var grow = 1 - (1 - t) * (1 - t);
+        var fade = 1 - t;
+        if (pop.Ground)
+        {
+            var spread = pop.Size * (0.6f + 1.2f * grow);
+            using var ripple = new Pen(Color.FromArgb((int)(200 * fade), 200, 238, 255), 3 * fade + 1);
+            graphics.DrawEllipse(ripple, pop.X - spread, pop.Y - spread * 0.18f, spread * 2, spread * 0.36f);
+            return;
+        }
+
+        if (t < 0.2f)
+        {
+            using var flash = new Pen(Color.FromArgb((int)(220 * (1 - t / 0.2f)), 255, 255, 255), 3);
+            var size = pop.Size * (0.9f + 0.3f * t);
+            graphics.DrawEllipse(flash, pop.X - size, pop.Y - size, size * 2, size * 2);
+        }
+
+        var radius = pop.Size * (1 + 0.6f * grow);
+        for (var index = 0; index < 12; index++)
+        {
+            var start = index * 30 + (float)Math.Sin(index * 7.3) * 12 + t * 40;
+            using var shred = new Pen(Color.FromArgb((int)(230 * fade), FoamColors[index % (FoamColors.Length - 1)]), 2.6f * fade + 0.6f)
+            {
+                StartCap = LineCap.Round,
+                EndCap = LineCap.Round
+            };
+            var curl = radius * (0.92f + 0.12f * (index % 3));
+            graphics.DrawArc(shred, pop.X - curl, pop.Y - curl, curl * 2, curl * 2, start, 16 * fade + 2);
+        }
+    }
+
+    // Where the beam leaves the cat: its mouth.
+    private PointF Mouth(RectangleF sky) => new(_ninjaX, sky.Bottom - RoofHeight + 4 - CatBodyHeight - CatHeadSize * 0.26f);
+
+    private const float CatHeadSize = 58;
+    private const float CatBodyHeight = 32;
+
+    // A ginger cat on the roof: round head, cream belly, swishing tail. Its paws
+    // patter and it bobs while it runs; it opens its mouth wide to fire, and looks
+    // sad for a moment when a bubble lands.
+    private void DrawCat(Graphics graphics, float x, float feetY)
+    {
+        var bob = _ninjaRunning ? Math.Abs((float)Math.Sin(_runPhase)) * 3 : (float)Math.Sin(_twinkle * 2.4) * 0.8f;
+        var swing = _ninjaRunning ? (float)Math.Sin(_runPhase) * 3 : 0;
+        using (var shadow = new SolidBrush(Color.FromArgb(70, 0, 0, 0)))
+        {
+            graphics.FillEllipse(shadow, x - 26, feetY - 4, 52, 8);
+        }
+
+        // Tail on the side away from where it is going, swishing.
+        var tailSide = -_facing;
+        var swish = (float)Math.Sin(_twinkle * 3) * 8;
+        using (var tailEdge = new Pen(CatArt.Ink, 9) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+        using (var tail = new Pen(CatArt.Ginger, 6) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+        using (var curve = new GraphicsPath())
+        {
+            curve.AddBezier(
+                x + tailSide * 16, feetY - 10 - bob,
+                x + tailSide * 38, feetY - 6,
+                x + tailSide * 38, feetY - 40 + swish,
+                x + tailSide * 28 + swish * 0.4f, feetY - 52 + swish * 0.5f);
+            graphics.DrawPath(tailEdge, curve);
+            graphics.DrawPath(tail, curve);
+        }
+
+        var body = new RectangleF(x - 22, feetY - CatBodyHeight - 4 - bob, 44, CatBodyHeight + 4);
+        using (var fur = new SolidBrush(CatArt.Ginger))
+        using (var outline = new Pen(CatArt.Ink, 2))
+        using (var cream = new SolidBrush(CatArt.Cream))
+        {
+            graphics.FillEllipse(fur, body);
+            graphics.DrawEllipse(outline, body);
+            graphics.FillEllipse(cream, x - 12, body.Y + 9, 24, body.Height - 12);
+            foreach (var side in new[] { -1, 1 })
+            {
+                var paw = new RectangleF(x + side * 11 - 7, feetY - 8 + side * swing, 14, 9);
+                graphics.FillEllipse(cream, paw);
+                graphics.DrawEllipse(outline, paw);
+            }
+        }
+
+        var mood = _throwPose > 0 ? CatArt.Mood.Surprised : _flash > 0 ? CatArt.Mood.Sad : CatArt.Mood.Happy;
+        var head = new RectangleF(x - CatHeadSize / 2, feetY - CatBodyHeight - bob - CatHeadSize * 0.88f, CatHeadSize, CatHeadSize);
+        CatArt.DrawCatHead(graphics, head, CatArt.Ginger, mood);
+
+        // A pink glow in the open mouth just as it fires.
+        if (_throwPose > 0)
+        {
+            var glow = (float)(_throwPose / 0.25);
+            var mouth = new PointF(x, head.Y + CatHeadSize * 0.74f);
+            using var halo = new SolidBrush(Color.FromArgb((int)(150 * glow), 255, 120, 200));
+            graphics.FillEllipse(halo, mouth.X - 12, mouth.Y - 12, 24, 24);
+            using var core = new SolidBrush(Color.FromArgb((int)(255 * glow), 255, 240, 250));
+            graphics.FillEllipse(core, mouth.X - 4, mouth.Y - 4, 8, 8);
+        }
+    }
+
+    // The beam from the cat's mouth: a pink ray with a white-hot core racing to
+    // its bubble, a bright spark at its head.
+    private static void DrawBeam(Graphics graphics, Beam beam)
+    {
+        var travelled = MathF.Sqrt((beam.X - beam.StartX) * (beam.X - beam.StartX) + (beam.Y - beam.StartY) * (beam.Y - beam.StartY));
+        var length = Math.Min(170, travelled);
+        var tail = new PointF(beam.X - beam.Dx * length, beam.Y - beam.Dy * length);
+        var head = new PointF(beam.X, beam.Y);
+        if (length > 1)
+        {
+            using var glowFade = new LinearGradientBrush(tail, head, Color.FromArgb(0, 255, 120, 200), Color.FromArgb(90, 255, 120, 200));
+            using var glow = new Pen(glowFade, 12) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            graphics.DrawLine(glow, tail, head);
+            using var rayFade = new LinearGradientBrush(tail, head, Color.FromArgb(0, 255, 110, 190), Color.FromArgb(230, 255, 110, 190));
+            using var ray = new Pen(rayFade, 5) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            graphics.DrawLine(ray, tail, head);
+            using var coreFade = new LinearGradientBrush(tail, head, Color.FromArgb(0, 255, 255, 255), Color.White);
+            using var core = new Pen(coreFade, 2) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            graphics.DrawLine(core, tail, head);
+        }
+
+        using var spark = new SolidBrush(Color.FromArgb(120, 255, 160, 220));
+        graphics.FillEllipse(spark, beam.X - 9, beam.Y - 9, 18, 18);
+        using var white = new SolidBrush(Color.White);
+        graphics.FillEllipse(white, beam.X - 4, beam.Y - 4, 8, 8);
     }
 
     private void DrawHud(Graphics graphics, RectangleF sky)
@@ -1899,11 +1560,11 @@ internal sealed class NinjaGame : Panel
         var scoreWidth = DrawPill(graphics, 16, "⭐", $"{_score} điểm", pill, Color.FromArgb(253, 224, 71));
         if (_combo > 1)
         {
-            DrawPill(graphics, 16 + scoreWidth + 10, "🔥", $"Combo x{_combo}", pill, Color.FromArgb(253, 186, 116));
+            DrawPill(graphics, 16 + scoreWidth + 10, "✨", $"Combo x{_combo}", pill, Color.FromArgb(253, 186, 116));
         }
 
         var levelText = $"Cấp {Level}";
-        DrawPill(graphics, sky.Width / 2 - PillWidth(graphics, levelText) / 2, "⚔", levelText, pill, Color.White);
+        DrawPill(graphics, sky.Width / 2 - PillWidth(graphics, levelText) / 2, "🐾", levelText, pill, Color.White);
         const float heart = 24;
         for (var index = 0; index < MaxLives; index++)
         {
@@ -1955,20 +1616,20 @@ internal sealed class NinjaGame : Panel
         string detail;
         if (_gameOver)
         {
-            title = "💥 Hết lượt rồi!";
+            title = "🫧 Hết lượt rồi!";
             detail = $"Điểm: {_score}   •   Cao nhất: {BestScore}   •   Chọn chế độ rồi chơi lại";
         }
         else if (!hasWords)
         {
-            title = "⚔ Ninja phi tiêu";
+            title = "🐱 Mèo bắn bong bóng";
             detail = "Hãy chọn từ để học trước (Danh sách từ → Chọn từ để học).";
         }
         else
         {
-            title = "⚔ Ninja phi tiêu";
+            title = "🐱 Mèo bắn bong bóng";
             detail = BestScore > 0
-                ? $"Gõ chữ Hán hoặc pinyin không dấu của chữ đang rơi để ninja phóng phi tiêu. Cao nhất: {BestScore}"
-                : "Gõ chữ Hán hoặc pinyin không dấu của chữ đang rơi để ninja phóng phi tiêu trước khi chữ chạm mái nhà!";
+                ? $"Gõ chữ Hán hoặc pinyin không dấu của chữ trong bong bóng để mèo bắn tia làm vỡ bóng. Cao nhất: {BestScore}"
+                : "Gõ chữ Hán hoặc pinyin không dấu của chữ trong bong bóng để mèo bắn tia làm vỡ bóng trước khi bóng chạm mái nhà!";
         }
 
         var centreY = (int)(sky.Height / 2);
@@ -1987,7 +1648,7 @@ internal sealed class NinjaGame : Panel
         public SizeF Size { get; } = size;
         public Color Color { get; } = color;
 
-        // Answered: it stops falling and waits for the shuriken.
+        // Answered: it stops falling and waits for the beam.
         public bool Targeted { get; set; }
 
         // The drawn word and what it shows (typed lengths, answered), made on demand.
@@ -1998,13 +1659,14 @@ internal sealed class NinjaGame : Panel
         public float CentreY => Y + Size.Height / 2;
     }
 
-    private sealed class Shuriken(float x, float y, FallingWord target)
+    private sealed class Beam(float x, float y, FallingWord target)
     {
         public float X { get; set; } = x;
         public float Y { get; set; } = y;
         public float Dx { get; set; }
         public float Dy { get; set; } = -1;
-        public float Spin { get; set; }
+        public float StartX { get; } = x;
+        public float StartY { get; } = y;
         public FallingWord Target { get; } = target;
     }
 
@@ -2015,17 +1677,11 @@ internal sealed class NinjaGame : Panel
 
     private sealed class Explosion(float x, float y, float size, bool ground)
     {
-        public const double Duration = 0.6;
+        public const double Duration = 0.45;
         public float X { get; } = x;
         public float Y { get; } = y;
         public float Size { get; } = size;
         public bool Ground { get; } = ground;
-        public double Age { get; set; }
-    }
-
-    private sealed class Crater(float x)
-    {
-        public float X { get; } = x;
         public double Age { get; set; }
     }
 
@@ -2045,6 +1701,10 @@ internal sealed class NinjaGame : Panel
         public float Vy { get; set; } = vy;
         public Color Color { get; } = color;
         public float Life { get; set; } = 0.7f;
+
+        // A tiny floating bubble rather than a droplet.
+        public bool Bubble { get; init; }
+        public float Size { get; init; } = 5;
     }
 
     private sealed class FloatingText(string text, float x, float y, Color color)

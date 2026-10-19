@@ -129,7 +129,7 @@ internal sealed class TranslationPractice : Panel
         _paragraphCard.Dock = DockStyle.Fill;
         _paragraphCard.Radius = 16;
         _paragraphCard.FillColor = Form1.AccentSoft;
-        _paragraphCard.OutlineColor = Color.FromArgb(191, 219, 254);
+        _paragraphCard.OutlineColor = Color.FromArgb(251, 203, 180);
         _paragraphCard.Padding = new Padding(20, 12, 20, 12);
         _paragraphCard.Controls.Add(cardBody);
         // The card grows with the paragraph: rows are sized to the wrapped text.

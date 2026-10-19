@@ -39,7 +39,7 @@ internal sealed class NameEntryForm : Form
             Size = new Size(ClientSize.Width, 24),
             Text = "Chào mừng bạn! Cùng học tiếng Trung mỗi ngày nhé 🌱",
             Font = new Font(Form1.UiFontName, 10F),
-            ForeColor = Color.FromArgb(219, 234, 254),
+            ForeColor = Color.FromArgb(255, 228, 214),
             BackColor = Form1.Accent,
             TextAlign = ContentAlignment.MiddleCenter
         };
@@ -50,13 +50,13 @@ internal sealed class NameEntryForm : Form
             Location = new Point(ClientSize.Width - 44, 10),
             Text = "✕",
             Font = new Font(Form1.UiFontName, 12F),
-            ForeColor = Color.FromArgb(219, 234, 254),
+            ForeColor = Color.FromArgb(255, 228, 214),
             BackColor = Form1.Accent,
             TextAlign = ContentAlignment.MiddleCenter,
             Cursor = Cursors.Hand
         };
         close.MouseEnter += (_, _) => close.ForeColor = Color.White;
-        close.MouseLeave += (_, _) => close.ForeColor = Color.FromArgb(219, 234, 254);
+        close.MouseLeave += (_, _) => close.ForeColor = Color.FromArgb(255, 228, 214);
         close.Click += (_, _) => Close();
         header.Controls.AddRange([brand, welcome, close]);
         // Playful icons scattered on the blue around the logo.
@@ -72,7 +72,7 @@ internal sealed class NameEntryForm : Form
         {
             foreach (var (icon, at) in decorations)
             {
-                TextRenderer.DrawText(e.Graphics, icon, decorationFont, at, Color.FromArgb(191, 219, 254));
+                TextRenderer.DrawText(e.Graphics, icon, decorationFont, at, Color.FromArgb(251, 203, 180));
             }
         };
         header.Disposed += (_, _) => decorationFont.Dispose();
@@ -173,7 +173,7 @@ internal sealed class NameEntryForm : Form
         };
     }
 
-    private static readonly Color FooterTint = Color.FromArgb(232, 238, 247);
+    private static readonly Color FooterTint = Color.FromArgb(255, 240, 230);
 
     // White middle area with all four corners rounded: the top corners sit on
     // the header blue and the bottom ones on the footer tint.
@@ -223,8 +223,8 @@ internal sealed class NameEntryForm : Form
         private static readonly Font HeartFont = new("Segoe UI Emoji", 10F);
         private static readonly Font ChipFont = new(Form1.UiFontName, 9.5F);
         private static readonly Font IconFont = new("Segoe UI Emoji", 9.5F);
-        private static readonly Color MailFill = Color.FromArgb(219, 234, 254);
-        private static readonly Color MailInk = Color.FromArgb(29, 78, 216);
+        private static readonly Color MailFill = Color.FromArgb(255, 228, 214);
+        private static readonly Color MailInk = Color.FromArgb(219, 90, 52);
         private readonly ToolTip _tip = new();
         private Rectangle _mailButton;
         private bool _showMail;
