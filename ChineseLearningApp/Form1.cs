@@ -484,6 +484,7 @@ public sealed partial class Form1 : Form
         var tabs = new PageHost { Dock = DockStyle.Fill, Font = new Font(UiFontName, 10.5F) };
         var vocabularyPage = BuildVocabularyPage();
         var flashcardPage = BuildFlashcardPage();
+        var translationPage = BuildTranslationPage();
         var settingsPage = BuildColumnSettingsPage();
         // The app opens on Home, which leads to the other pages.
         tabs.TabPages.Add(BuildHomePage(tabs,
@@ -491,11 +492,13 @@ public sealed partial class Form1 : Form
             new HomeDestination(vocabularyPage, "📚", "Xem, tìm kiếm và tích chọn từ để học", Color.FromArgb(219, 234, 254)),
             new HomeDestination(flashcardPage, "🃏", "Lật thẻ để nhớ nghĩa, ví dụ và ngữ pháp", Color.FromArgb(252, 231, 243)),
             new HomeDestination(practicePage, "⌨", "Gõ lại từ và câu ví dụ bằng tiếng Trung", Color.FromArgb(220, 252, 231)),
+            new HomeDestination(translationPage, "📝", "AI viết đoạn văn ngắn, bạn dịch và được chấm điểm", Color.FromArgb(237, 233, 254)),
             new HomeDestination(settingsPage, "⚙", "Nhập, thêm từ và chọn cột hiển thị", Color.FromArgb(254, 243, 199))
         ]));
         tabs.TabPages.Add(vocabularyPage);
         tabs.TabPages.Add(flashcardPage);
         tabs.TabPages.Add(practicePage);
+        tabs.TabPages.Add(translationPage);
         tabs.TabPages.Add(settingsPage);
         tabs.SelectedIndexChanged += PracticeTab_SelectedIndexChanged;
         _tabs = tabs;
@@ -627,24 +630,29 @@ public sealed partial class Form1 : Form
         host.Controls.AddRange(tiles.ToArray());
         host.Controls.Add(hskProgress);
 
-        // Centre everything; four cards per row when there is room, else two.
+        // Centre everything. With room, the statistics sit four to a row and all the
+        // page cards share one row below them, narrowed to the same overall width;
+        // on a narrow window both go two to a row.
         void LayoutHome()
         {
             UpdateStatistics();
-            const int tileWidth = 280;
-            const int tileHeight = 190;
+            const int statWidth = 280;
             const int statHeight = 104;
             const int gap = 24;
-            var columns = host.ClientSize.Width >= 4 * tileWidth + 3 * gap + 80 ? 4 : 2;
-            var gridWidth = columns * tileWidth + (columns - 1) * gap;
-            int GridHeight(int count, int itemHeight)
+            var wide = host.ClientSize.Width >= 4 * statWidth + 3 * gap + 80;
+            var statColumns = wide ? 4 : 2;
+            var gridWidth = statColumns * statWidth + (statColumns - 1) * gap;
+            var tileColumns = wide ? tiles.Count : 2;
+            var tileWidth = (gridWidth - (tileColumns - 1) * gap) / tileColumns;
+            var tileHeight = 200;
+            int GridHeight(int count, int columns, int itemHeight)
             {
                 var rows = (count + columns - 1) / columns;
                 return rows * itemHeight + (rows - 1) * gap;
             }
 
-            var statsHeight = GridHeight(statCards.Count, statHeight);
-            var tilesHeight = GridHeight(tiles.Count, tileHeight);
+            var statsHeight = GridHeight(statCards.Count, statColumns, statHeight);
+            var tilesHeight = GridHeight(tiles.Count, tileColumns, tileHeight);
             var progressHeight = hskProgress.GetPreferredHeight(gridWidth);
             var totalHeight = title.Height + 8 + subtitle.Height + 28 + statsHeight + gap + tilesHeight + gap + progressHeight;
             var scroll = host.AutoScrollPosition;
@@ -655,21 +663,21 @@ public sealed partial class Form1 : Form
             subtitle.Location = new Point(centerX - subtitle.Width / 2, top);
             top += subtitle.Height + 28;
             var left = centerX - gridWidth / 2;
-            void PlaceGrid(IReadOnlyList<Control> items, int itemHeight)
+            void PlaceGrid(IReadOnlyList<Control> items, int columns, int itemWidth, int itemHeight)
             {
                 for (var index = 0; index < items.Count; index++)
                 {
                     items[index].Bounds = new Rectangle(
-                        left + index % columns * (tileWidth + gap),
+                        left + index % columns * (itemWidth + gap),
                         top + index / columns * (itemHeight + gap),
-                        tileWidth,
+                        itemWidth,
                         itemHeight);
                 }
             }
 
-            PlaceGrid(statCards, statHeight);
+            PlaceGrid(statCards, statColumns, statWidth, statHeight);
             top += statsHeight + gap;
-            PlaceGrid(tiles, tileHeight);
+            PlaceGrid(tiles, tileColumns, tileWidth, tileHeight);
             top += tilesHeight + gap;
             hskProgress.Bounds = new Rectangle(left, top, gridWidth, progressHeight);
             host.AutoScrollMinSize = new Size(0, totalHeight + 40);
@@ -2360,6 +2368,21 @@ public sealed partial class Form1 : Form
         layout.Controls.Add(buttons, 0, 3);
         layout.Controls.Add(instruction, 0, 4);
         page.Controls.Add(layout);
+        return page;
+    }
+
+    // Paragraph translation: the free AI writes short paragraphs (using words being
+    // studied when it can) and marks the learner's Vietnamese translation.
+    private TabPage BuildTranslationPage()
+    {
+        var page = CreatePage("Dịch đoạn văn");
+        page.Padding = new Padding(20);
+        var practice = new TranslationPractice
+        {
+            StudyWords = () => _studyWords.Select(word => word.Chinese).ToList(),
+            Speak = SpeakTypedChinese
+        };
+        page.Controls.Add(CreateCard(practice, new Padding(8)));
         return page;
     }
 
