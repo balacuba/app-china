@@ -76,31 +76,44 @@ internal static class CatArt
     };
 
     // One clock for every moving cat, and the controls showing them: while one
-    // is on screen it is repainted 25 times a second.
+    // is on screen, the part with the cat (or all of it) is repainted 15 times a second,
+    // but only while the app is the active window, so it costs nothing in the background.
     private static readonly System.Diagnostics.Stopwatch Clock = System.Diagnostics.Stopwatch.StartNew();
-    private static readonly List<WeakReference<Control>> Animated = [];
+    private static readonly List<(WeakReference<Control> Control, Func<Control, Rectangle>? Area)> Animated = [];
     private static System.Windows.Forms.Timer? _ticker;
 
     public static float Now => (float)Clock.Elapsed.TotalSeconds;
 
-    public static void Animate(Control control)
+    public static void Animate(Control control, Func<Control, Rectangle>? area = null)
     {
-        Animated.Add(new WeakReference<Control>(control));
+        Animated.Add((new WeakReference<Control>(control), area));
         if (_ticker is not null)
         {
             return;
         }
 
-        _ticker = new System.Windows.Forms.Timer { Interval = 40 };
+        _ticker = new System.Windows.Forms.Timer { Interval = 66 };
         _ticker.Tick += (_, _) =>
         {
-            Animated.RemoveAll(reference => !reference.TryGetTarget(out var target) || target.IsDisposed);
-            foreach (var reference in Animated)
+            Animated.RemoveAll(entry => !entry.Control.TryGetTarget(out var target) || target.IsDisposed);
+            if (Form.ActiveForm is null)
+            {
+                return;
+            }
+
+            foreach (var (reference, area) in Animated)
             {
                 if (reference.TryGetTarget(out var target) && target.Visible && target.IsHandleCreated &&
                     target.FindForm() is { Visible: true, WindowState: not FormWindowState.Minimized })
                 {
-                    target.Invalidate();
+                    if (area is null)
+                    {
+                        target.Invalidate();
+                    }
+                    else
+                    {
+                        target.Invalidate(area(target));
+                    }
                 }
             }
         };
@@ -676,16 +689,10 @@ internal static class CatArt
         graphics.FillEllipse(brush, X(0.46f), Y(0.64f), s * 0.08f, s * 0.05f);
     }
 
-    // Puts the cat wallpaper behind a page: the page (or form) gets the tiled
-    // pattern as its background image, and every container, label or custom
-    // control on it painted in the page colour turns see-through, so the pattern
-    // runs on unbroken behind the white cards.
-    public static void Wallpaper(Control page, Color pageColour)
-    {
-        page.BackgroundImage = PatternTile(pageColour);
-        page.BackgroundImageLayout = ImageLayout.Tile;
-        Follow(page, pageColour);
-    }
+    // Lets the cat wallpaper of a PatternPage show through: every container,
+    // label or custom control on it painted in the page colour turns see-through,
+    // so the pattern runs on unbroken behind the white cards.
+    public static void Wallpaper(Control page, Color pageColour) => Follow(page, pageColour);
 
     // Children added later (rebuilt lists, new cards) get the same treatment.
     private static void Follow(Control container, Color pageColour)
@@ -718,12 +725,12 @@ internal static class CatArt
 
         for (var ancestor = control.Parent; ancestor is not null; ancestor = ancestor.Parent)
         {
-            if (ancestor.BackgroundImage is { } tile && ancestor.BackgroundImageLayout == ImageLayout.Tile)
+            if (ancestor is PatternPage patterned)
             {
-                var offset = ancestor.PointToClient(control.PointToScreen(Point.Empty));
-                using var brush = new TextureBrush(tile, WrapMode.Tile);
-                brush.TranslateTransform(-offset.X, -offset.Y);
-                graphics.FillRectangle(brush, control.ClientRectangle);
+                var offset = patterned.PointToClient(control.PointToScreen(Point.Empty));
+                // Only the part being repainted (an animated icon is a small corner).
+                var area = Rectangle.Intersect(control.ClientRectangle, Rectangle.Ceiling(graphics.ClipBounds));
+                patterned.CopyPattern(graphics, area, new Point(offset.X + area.X, offset.Y + area.Y));
                 return;
             }
 
@@ -745,22 +752,37 @@ internal static class CatArt
 
     private static void SeeThrough(Control control, Color pageColour)
     {
-        if (control.BackColor.ToArgb() == pageColour.ToArgb() && control is not TextBoxBase and not DataGridView and not ListBox and not ComboBox)
+        // Inside a card, or anything with a colour of its own, the page colour is
+        // meant as a fill, so leave what is in there alone. Cards and the app's own
+        // drawn controls already paint the pattern behind themselves.
+        if (control is Form1.RoundedPanel || control.BackColor.ToArgb() != pageColour.ToArgb() ||
+            control is TextBoxBase or DataGridView or ListBox or ComboBox)
+        {
+            return;
+        }
+
+        if (control is Panel or TableLayoutPanel or FlowLayoutPanel or UserControl)
+        {
+            // Containers stay solid and copy the pattern over their own background.
+            // (A see-through container would make Windows repaint everything
+            // behind it the slow way, which made switching pages lag.)
+            // Drawn off screen first, the copy is a fast memory-to-memory one.
+            typeof(Control).GetProperty("DoubleBuffered", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .SetValue(control, true);
+            control.Paint += (_, e) => PaintBehind(control, e.Graphics, Color.Transparent);
+        }
+        else
         {
             try
             {
+                // Small things such as labels and check boxes simply see through.
                 control.BackColor = Color.Transparent;
             }
             catch (ArgumentException)
             {
                 // The control cannot be see-through; it keeps the plain page colour.
             }
-        }
 
-        // Inside a card, or anything with a colour of its own, the page colour is
-        // meant as a fill, so leave what is in there alone.
-        if (control is Form1.RoundedPanel || control.BackColor.A == 255)
-        {
             return;
         }
 
@@ -826,5 +848,62 @@ internal sealed class WavingCat : Control
     {
         CatArt.PaintBehind(this, e.Graphics, BackColor);
         CatArt.DrawGreetingCats(e.Graphics, new RectangleF(2, 4, Width - 4, Height - 6), CatArt.Now);
+    }
+}
+
+// A page with the faint cat wallpaper behind it. The pattern is drawn once into
+// a picture the size of the page, and painting the background (for the page or
+// any see-through control on it) is a single copy of the part that shows, which
+// keeps switching pages quick.
+internal sealed class PatternPage : TabPage
+{
+    private Bitmap? _canvas;
+
+    public PatternPage(string title) : base(title)
+    {
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+    }
+
+    public Bitmap Canvas
+    {
+        get
+        {
+            var size = new Size(Math.Max(1, ClientSize.Width), Math.Max(1, ClientSize.Height));
+            if (_canvas is null || _canvas.Size != size)
+            {
+                _canvas?.Dispose();
+                _canvas = new Bitmap(size.Width, size.Height, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+                using var graphics = Graphics.FromImage(_canvas);
+                using var pattern = new TextureBrush(CatArt.PatternTile(BackColor), WrapMode.Tile);
+                graphics.FillRectangle(pattern, 0, 0, size.Width, size.Height);
+            }
+
+            return _canvas;
+        }
+    }
+
+    protected override void OnPaintBackground(PaintEventArgs e) =>
+        CopyPattern(e.Graphics, e.ClipRectangle, e.ClipRectangle.Location);
+
+    // Copies the pattern starting at `source` (page coordinates) into `area`, as a
+    // straight pixel copy: no blending or smoothing to slow it down.
+    public void CopyPattern(Graphics graphics, Rectangle area, Point source)
+    {
+        var state = graphics.Save();
+        graphics.CompositingMode = CompositingMode.SourceCopy;
+        graphics.InterpolationMode = InterpolationMode.NearestNeighbor;
+        graphics.PixelOffsetMode = PixelOffsetMode.Half;
+        graphics.DrawImage(Canvas, area, new Rectangle(source, area.Size), GraphicsUnit.Pixel);
+        graphics.Restore(state);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _canvas?.Dispose();
+        }
+
+        base.Dispose(disposing);
     }
 }

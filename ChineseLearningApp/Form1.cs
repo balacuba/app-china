@@ -729,7 +729,7 @@ public sealed partial class Form1 : Form
                 ControlStyles.ResizeRedraw |
                 ControlStyles.UserPaint,
                 true);
-            CatArt.Animate(this);
+            CatArt.Animate(this, card => new Rectangle(8, (card.Height - 46) / 2 - 12, 66, 70));
             BackColor = PageColor;
         }
 
@@ -4554,7 +4554,7 @@ public sealed partial class Form1 : Form
                 ControlStyles.ResizeRedraw |
                 ControlStyles.UserPaint,
                 true);
-            CatArt.Animate(this);
+            CatArt.Animate(this, header => new Rectangle(0, 0, 56, 56));
             BackColor = SurfaceColor;
         }
 
@@ -4604,7 +4604,7 @@ public sealed partial class Form1 : Form
                 ControlStyles.ResizeRedraw |
                 ControlStyles.UserPaint,
                 true);
-            CatArt.Animate(this);
+            CatArt.Animate(this, tile => new Rectangle((tile.Width - 64) / 2 - 14, 6, 92, 92));
             Cursor = Cursors.Hand;
             BackColor = PageColor;
         }
@@ -6627,7 +6627,7 @@ public sealed partial class Form1 : Form
         };
 
     private static TabPage CreatePage(string title) =>
-        new(title) { BackColor = PageColor, Padding = new Padding(4) };
+        new PatternPage(title) { BackColor = PageColor, Padding = new Padding(4) };
 
     private static Label CreateTitle(string text) =>
         new()
