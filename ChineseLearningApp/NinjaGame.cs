@@ -408,15 +408,21 @@ internal sealed class NinjaGame : Panel
         var speed = roofTop / FallSeconds * (34 + Level * 10) / 44;
         for (var index = _words.Count - 1; index >= 0; index--)
         {
+            // Answered words keep falling too; the shuriken homes in on them as they go.
             var falling = _words[index];
-            if (falling.Targeted)
-            {
-                // Already answered: it hangs where it is until the shuriken arrives.
-                continue;
-            }
-
             falling.Y += (float)(speed * dt);
-            if (falling.Y + falling.Size.Height >= roofTop)
+            if (falling.Y + falling.Size.Height >= roofTop && falling.Targeted)
+            {
+                // Answered, but the shuriken is still on its way: the answer was right,
+                // so it blows up here as a hit rather than costing a life.
+                if (_aiming == falling)
+                {
+                    _aiming = null;
+                }
+
+                HitWord(falling);
+            }
+            else if (falling.Y + falling.Size.Height >= roofTop)
             {
                 // Landed on the roof: it blows up and leaves a crater; lose a life and the combo.
                 _words.RemoveAt(index);
@@ -1092,7 +1098,7 @@ internal sealed class NinjaGame : Panel
     // A blazing meteor: the word sits in a white-hot head with a molten orange edge,
     // wrapped in a warm glow, dragging a sheaf of fiery blades and burning chips,
     // with small meteors flying around it.
-    // A word already answered hangs still but keeps burning until the shuriken hits.
+    // A word already answered keeps falling and burning until the shuriken hits.
     private void DrawMeteor(Graphics graphics, FallingWord falling)
     {
         var centreX = falling.CentreX;
