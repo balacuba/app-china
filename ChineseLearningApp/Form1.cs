@@ -2957,32 +2957,64 @@ public sealed partial class Form1 : Form
         XNamespace relationship = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
         XNamespace packageRelationship = "http://schemas.openxmlformats.org/package/2006/relationships";
 
-        var firstSheet = workbook.Root?
+        var sheetIds = workbook.Root?
             .Element(spreadsheet + "sheets")?
             .Elements(spreadsheet + "sheet")
-            .FirstOrDefault();
-        var relationshipId = (string?)firstSheet?.Attribute(relationship + "id");
-        if (string.IsNullOrWhiteSpace(relationshipId))
+            .Select(sheet => (string?)sheet.Attribute(relationship + "id"))
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .ToList() ?? [];
+        if (sheetIds.Count == 0)
         {
             throw new FormatException("Tệp Excel không có trang tính nào để nhập.");
         }
 
         var relationships = LoadExcelXml(archive, "xl/_rels/workbook.xml.rels");
-        var sheetTarget = (string?)relationships.Root?
-            .Elements(packageRelationship + "Relationship")
-            .FirstOrDefault(item => (string?)item.Attribute("Id") == relationshipId)?
-            .Attribute("Target");
-        if (string.IsNullOrWhiteSpace(sheetTarget))
+        var sharedStrings = ReadSharedStrings(archive);
+
+        // Every sheet that holds a word list is imported (a workbook may keep one
+        // sheet per HSK level); sheets that don't, such as a summary of counts,
+        // are skipped. Only when no sheet can be read is the first one's problem
+        // reported.
+        var result = new List<VocabularyWord>();
+        FormatException? firstProblem = null;
+        foreach (var relationshipId in sheetIds)
         {
-            throw new FormatException("Không tìm thấy trang tính đầu tiên trong tệp Excel.");
+            var sheetTarget = (string?)relationships.Root?
+                .Elements(packageRelationship + "Relationship")
+                .FirstOrDefault(item => (string?)item.Attribute("Id") == relationshipId)?
+                .Attribute("Target");
+            if (string.IsNullOrWhiteSpace(sheetTarget))
+            {
+                firstProblem ??= new FormatException("Không tìm thấy trang tính trong tệp Excel.");
+                continue;
+            }
+
+            var worksheetPath = NormalizeArchivePath(
+                sheetTarget.StartsWith("/", StringComparison.Ordinal)
+                    ? sheetTarget.TrimStart('/')
+                    : $"xl/{sheetTarget}");
+            try
+            {
+                result.AddRange(ParseExcelSheet(LoadExcelXml(archive, worksheetPath), spreadsheet, sharedStrings));
+            }
+            catch (FormatException ex)
+            {
+                firstProblem ??= ex;
+            }
         }
 
-        var worksheetPath = NormalizeArchivePath(
-            sheetTarget.StartsWith("/", StringComparison.Ordinal)
-                ? sheetTarget.TrimStart('/')
-                : $"xl/{sheetTarget}");
-        var worksheet = LoadExcelXml(archive, worksheetPath);
-        var sharedStrings = ReadSharedStrings(archive);
+        if (result.Count == 0)
+        {
+            throw firstProblem ?? new FormatException("Tệp Excel không có từ vựng nào để nhập.");
+        }
+
+        return result;
+    }
+
+    // The words on one sheet: a header row naming the columns (or the fixed
+    // column order when there is none), then one word per row.
+    private static List<VocabularyWord> ParseExcelSheet(XDocument worksheet, XNamespace spreadsheet, string[] sharedStrings)
+    {
         var sheetData = worksheet.Root?.Element(spreadsheet + "sheetData")
             ?? throw new FormatException("Trang tính Excel không chứa dữ liệu.");
 
