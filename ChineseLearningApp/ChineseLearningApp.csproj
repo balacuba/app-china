@@ -11,4 +11,9 @@
     <Product>Chinese Learning App</Product>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Full word list a fresh install starts with (no vocabulary.json yet). -->
+    <EmbeddedResource Include="Data\vocabulary-starter.json" LogicalName="ChineseLearningApp.vocabulary-starter.json" />
+  </ItemGroup>
+
 </Project>

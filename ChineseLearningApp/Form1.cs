@@ -2640,12 +2640,35 @@ public sealed partial class Form1 : Form
             return;
         }
 
-        foreach (var word in StarterWords())
+        foreach (var word in BundledWords() ?? StarterWords())
         {
             _words.Add(word);
         }
 
         SaveWords(_words.ToList());
+    }
+
+    // The full word list shipped inside the exe, or null when it is missing or unreadable.
+    private static List<VocabularyWord>? BundledWords()
+    {
+        try
+        {
+            using var stream = typeof(Form1).Assembly
+                .GetManifestResourceStream("ChineseLearningApp.vocabulary-starter.json");
+            if (stream is null)
+            {
+                return null;
+            }
+
+            var words = JsonSerializer.Deserialize<List<VocabularyWord>>(stream)?
+                .Where(IsValid)
+                .ToList();
+            return words is { Count: > 0 } ? words : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private void SaveWords(IReadOnlyCollection<VocabularyWord> words)
