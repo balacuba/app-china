@@ -16,4 +16,8 @@
     <EmbeddedResource Include="Data\vocabulary-starter.json" LogicalName="ChineseLearningApp.vocabulary-starter.json" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\ChineseLearning.Sync\ChineseLearning.Sync.csproj" />
+  </ItemGroup>
+
 </Project>
