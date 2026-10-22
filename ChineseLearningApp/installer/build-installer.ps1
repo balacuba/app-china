@@ -32,15 +32,30 @@ if (-not $compiler) {
     throw "Inno Setup 6 or 7 is required. Install it from https://jrsoftware.org/isinfo.php and run this script again."
 }
 
+$serverProject = Join-Path (Split-Path -Parent $projectDirectory) "ChineseLearningServer\ChineseLearningServer.csproj"
+$serverPublishDirectory = Join-Path $artifactsDirectory "publish-server"
+
 New-Item -ItemType Directory -Path $artifactsDirectory -Force | Out-Null
-& dotnet publish $projectFile `
-    --configuration Release `
-    --runtime win-x64 `
-    --self-contained true `
-    "-p:Version=$Version" `
-    "-p:PublishDir=$publishDirectory\"
-if ($LASTEXITCODE -ne 0) {
-    throw "dotnet publish failed with exit code $LASTEXITCODE."
+# Start from empty publish folders so files from older builds never end up in
+# the installer.
+foreach ($folder in @($publishDirectory, $serverPublishDirectory)) {
+    if (Test-Path -LiteralPath $folder) {
+        Remove-Item -LiteralPath $folder -Recurse -Force
+    }
+}
+
+# Both the desktop app and the study server (website) are self-contained: the
+# .NET runtime ships inside each, so they run on a PC that has never had .NET.
+foreach ($publish in @(@($projectFile, $publishDirectory), @($serverProject, $serverPublishDirectory))) {
+    & dotnet publish $publish[0] `
+        --configuration Release `
+        --runtime win-x64 `
+        --self-contained true `
+        "-p:Version=$Version" `
+        "-p:PublishDir=$($publish[1])\"
+    if ($LASTEXITCODE -ne 0) {
+        throw "dotnet publish of $($publish[0]) failed with exit code $LASTEXITCODE."
+    }
 }
 
 & $compiler "/DMyAppVersion=$Version" $installerScript
