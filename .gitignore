@@ -1,0 +1,7 @@
+bin/
+obj/
+*.user
+# The study server's databases (accounts and progress, and any copies of
+# them) stay on the machine.
+app-data*.db
+app-data*.db-*

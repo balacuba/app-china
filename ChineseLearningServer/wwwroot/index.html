@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Học tiếng Trung</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="bar" id="bar" hidden>
+    <!-- Like the desktop app: "Trang chủ" on Home, "Về trang chủ" elsewhere;
+         the other pages open from the cards on Home. -->
+    <a class="home-button" id="home-button" href="#/"><span aria-hidden="true" id="home-icon">🏠</span><span id="home-text">Trang chủ</span></a>
+    <a class="brand" href="#/"><span class="logo">汉</span><span>Học tiếng Trung</span></a>
+    <div class="account">
+      <button class="sync" id="sync-button" type="button" title="Đồng bộ ngay">
+        <span class="dot" id="sync-dot"></span><span id="sync-text">Đồng bộ</span>
+      </button>
+      <button class="ghost" id="logout" type="button">Đăng xuất</button>
+    </div>
+  </header>
+  <main id="view" aria-live="polite"></main>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

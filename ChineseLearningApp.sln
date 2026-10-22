@@ -5,6 +5,12 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChineseLearningApp", "ChineseLearningApp\ChineseLearningApp.csproj", "{4BE27CB2-0023-49C4-86DC-ED463A1B5878}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChineseLearning.Sync", "ChineseLearning.Sync\ChineseLearning.Sync.csproj", "{3BAE4F69-B658-40F3-9082-307D747BC807}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChineseLearning.Tests", "ChineseLearning.Tests\ChineseLearning.Tests.csproj", "{91436658-8967-4DE8-B69A-EBAB64001E15}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChineseLearningServer", "ChineseLearningServer\ChineseLearningServer.csproj", "{DD84168E-8E64-4D15-9317-63D4322F73D1}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -18,5 +24,17 @@ Global
 		{4BE27CB2-0023-49C4-86DC-ED463A1B5878}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{4BE27CB2-0023-49C4-86DC-ED463A1B5878}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{4BE27CB2-0023-49C4-86DC-ED463A1B5878}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3BAE4F69-B658-40F3-9082-307D747BC807}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3BAE4F69-B658-40F3-9082-307D747BC807}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3BAE4F69-B658-40F3-9082-307D747BC807}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3BAE4F69-B658-40F3-9082-307D747BC807}.Release|Any CPU.Build.0 = Release|Any CPU
+		{91436658-8967-4DE8-B69A-EBAB64001E15}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{91436658-8967-4DE8-B69A-EBAB64001E15}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{91436658-8967-4DE8-B69A-EBAB64001E15}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{91436658-8967-4DE8-B69A-EBAB64001E15}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DD84168E-8E64-4D15-9317-63D4322F73D1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DD84168E-8E64-4D15-9317-63D4322F73D1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DD84168E-8E64-4D15-9317-63D4322F73D1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DD84168E-8E64-4D15-9317-63D4322F73D1}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
