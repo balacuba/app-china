@@ -44,7 +44,8 @@ Google không cho đăng nhập trên trang mở bằng địa chỉ IP hay bằ
 
 Lưu ý:
 - Không gõ `https://` với cổng `5080`: cổng đó chỉ chạy `http`. https luôn ở cổng 443, tức địa chỉ không ghi số cổng.
-- IP WAN đổi thì tên `…sslip.io` cũng đổi: tắt https, xóa ô tên miền rồi bật lại, rồi sửa địa chỉ trong Google Cloud. Muốn tên cố định thì dùng DDNS (DuckDNS miễn phí) và gõ tên đó vào ô tên miền.
+- IP WAN đổi thì app tự đổi tên `…sslip.io` theo IP mới (kiểm tra mỗi 10 phút), khởi động lại trang web và xin chứng chỉ mới. Thẻ **Trang web học** báo địa chỉ mới: nhớ sửa địa chỉ đó trong Google Cloud. Muốn tên cố định thì dùng DDNS (DuckDNS miễn phí) và gõ tên đó vào ô tên miền.
+- Thẻ **Trang web học** hiện trạng thái chứng chỉ: 🔒 hợp lệ đến ngày nào, ⏳ đang xin, hoặc ⚠ lý do Let's Encrypt chưa cấp (thường do router chưa chuyển cổng 80/443).
 - Cổng 80 hoặc 443 đang bị chương trình khác dùng (IIS, máy chủ web khác) thì app báo lỗi; tắt chương trình đó hoặc tắt https.
 - Một số nhà mạng chặn cổng 80/443 cho gói gia đình; khi đó Let's Encrypt không cấp được chứng chỉ.
 

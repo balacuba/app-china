@@ -20,6 +20,7 @@ public sealed partial class Form1
         var status = Line(new Font("Segoe UI Semibold", 11F), BodyTextColor, new Padding(0, 4, 0, 4));
         var addresses = Line(new Font(UiFontName, 10.5F), BodyTextColor, new Padding(0, 2, 0, 6));
         var note = Line(new Font(UiFontName, 9.5F), MutedTextColor, new Padding(0, 8, 0, 0));
+        var certificate = Line(new Font(UiFontName, 10.5F), BodyTextColor, new Padding(0, 0, 0, 6));
         var allowOthers = new CheckBox
         {
             AutoSize = true,
@@ -71,6 +72,29 @@ public sealed partial class Form1
                   (StudyWebsite.ServesHttps ? $"\nQua https (đăng nhập Google được):  {StudyWebsite.HttpsAddress}" : "")
                 : "\n(Chỉ máy này mở được trang web.)");
             httpsRow.Enabled = StudyWebsite.AllowOthers;
+
+            // The https certificate: valid until when, or why there is none yet.
+            certificate.Visible = StudyWebsite.ServesHttps && StudyWebsite.Running;
+            if (certificate.Visible)
+            {
+                var expires = StudyWebsite.CertificateExpires();
+                (certificate.Text, certificate.ForeColor) = expires is { } until
+                    ? ($"🔒 Chứng chỉ https hợp lệ đến {until:dd/MM/yyyy} (tự gia hạn).", SuccessColor)
+                    : StudyWebsite.CertificateProblem is { } why
+                        ? ($"⚠ Chưa có chứng chỉ https. Let's Encrypt báo: {why}\nKiểm tra router đã chuyển cổng 80 và 443 (TCP) về máy này, và tường lửa đã mở.", DangerText)
+                        : ("⏳ Đang xin chứng chỉ https từ Let's Encrypt… (cần router chuyển cổng 80 và 443 về máy này)", MutedTextColor);
+            }
+
+            if (StudyWebsite.DomainChange is { } change)
+            {
+                note.Text = change;
+            }
+
+            // An sslip.io name may have followed a new WAN IP.
+            if (!domain.Focused)
+            {
+                domain.Text = StudyWebsite.HttpsDomain;
+            }
         }
 
         // Starts the website again with https as chosen; the domain is the WAN
@@ -193,7 +217,7 @@ public sealed partial class Form1
             BackColor = SurfaceColor,
             Padding = new Padding(0, 4, 0, 0)
         };
-        body.Controls.AddRange([status, addresses, allowOthers, httpsRow, buttons, note]);
+        body.Controls.AddRange([status, addresses, certificate, allowOthers, httpsRow, buttons, note]);
         return CreateSettingsSection("🌐", Color.FromArgb(254, 226, 226), "Trang web học",
             "App chạy luôn trang web học: mở trên trình duyệt máy này, điện thoại cùng Wi-Fi, hoặc từ xa qua Internet.", body);
     }

@@ -1645,7 +1645,7 @@ public sealed partial class Form1 : Form
             $"Phóng to hoặc thu nhỏ chữ của mỗi cột trong danh sách từ ({MinimumCellFontSize:0}–{MaximumCellFontSize:0} pt).", fontGrid);
 
         const int headingHeight = 72;
-        const int websiteRowHeight = 430;
+        const int websiteRowHeight = 480;
         const int syncRowHeight = 266;
         const int updateRowHeight = 210;
         const int topRowHeight = 450;

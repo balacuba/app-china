@@ -8,6 +8,7 @@ using LettuceEncrypt;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace ChineseLearningApp;
 
@@ -21,7 +22,10 @@ namespace ChineseLearningApp;
 // domain name, by default <WAN IP with dashes>.sslip.io, which always points at
 // that IP, with a free certificate from Let's Encrypt fetched and renewed by
 // LettuceEncrypt. Google sign-in needs that: it refuses pages opened by IP or
-// over http. The router must forward ports 80 and 443 to this PC.
+// over http. The router must forward ports 80 and 443 to this PC. A watch
+// every half minute notices a new certificate (or why Let's Encrypt refused
+// one), and every ten minutes whether the WAN IP changed: an sslip.io name
+// then follows the new IP (the website starts again under it).
 //
 // Its settings (port, others allowed, https) are in website-settings.json with
 // the app's other data; its database and certificates stay in the server folder there.
@@ -49,6 +53,23 @@ internal static class StudyWebsite
 
     public static string HttpsAddress => $"https://{HttpsDomain}";
 
+    // An <IP>.sslip.io name, which follows the WAN IP when it changes.
+    public static bool FollowsInternetAddress => HttpsDomain.EndsWith(".sslip.io", StringComparison.Ordinal);
+
+    // What Let's Encrypt (through LettuceEncrypt) last said went wrong, or null.
+    public static string? CertificateProblem { get; private set; }
+
+    // Set when the WAN IP changed and the domain followed it: tells the learner
+    // to update the addresses in Google Cloud.
+    public static string? DomainChange { get; private set; }
+
+    // Finds the domain for the current WAN IP (replaceable by tests).
+    internal static Func<Task<string?>> CurrentDomain { get; set; } = DomainForInternetAddressAsync;
+
+    private static System.Threading.Timer? _watch;
+    private static int _watching;
+    private static DateTime _lastAddressCheck = DateTime.MinValue;
+
     // Why the website is not running, or null.
     public static string? Problem { get; private set; }
 
@@ -64,6 +85,68 @@ internal static class StudyWebsite
     {
         LoadSettings();
         _starting = Task.Run(StartCore);
+        _watch ??= new System.Threading.Timer(_ => _ = WatchAsync(), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30));
+    }
+
+    // The https certificate on disk for the domain, newest first; null when
+    // Let's Encrypt has not issued one yet.
+    public static DateTime? CertificateExpires()
+    {
+        try
+        {
+            var folder = Path.Combine(CertificateFolder, "certs");
+            if (!Directory.Exists(folder) || HttpsDomain.Length == 0)
+            {
+                return null;
+            }
+
+            DateTime? newest = null;
+            foreach (var file in Directory.EnumerateFiles(folder, "*.pfx"))
+            {
+                using var certificate = new System.Security.Cryptography.X509Certificates.X509Certificate2(file, (string?)null);
+                if (certificate.MatchesHostname(HttpsDomain) && certificate.NotAfter > DateTime.Now && (newest is null || certificate.NotAfter > newest))
+                {
+                    newest = certificate.NotAfter;
+                }
+            }
+
+            return newest;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException)
+        {
+            return null;
+        }
+    }
+
+    // Every half minute while https is served: tells the card (a certificate
+    // may have arrived); every ten minutes, follows a new WAN IP.
+    private static async Task WatchAsync()
+    {
+        if (!ServesHttps || Interlocked.Exchange(ref _watching, 1) == 1)
+        {
+            return;
+        }
+
+        try
+        {
+            if (FollowsInternetAddress && DateTime.Now - _lastAddressCheck > TimeSpan.FromMinutes(10))
+            {
+                _lastAddressCheck = DateTime.Now;
+                if (await CurrentDomain().ConfigureAwait(false) is { } domain && domain != HttpsDomain)
+                {
+                    DomainChange = $"IP WAN đã đổi: địa chỉ https mới là https://{domain} (trước là {HttpsAddress}). " +
+                                   "Nhớ sửa địa chỉ này trong Google Cloud (Authorized JavaScript origins và redirect URIs).";
+                    await RestartAsync(AllowOthers, true, domain).ConfigureAwait(false);
+                    return;
+                }
+            }
+
+            Changed?.Invoke();
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _watching, 0);
+        }
     }
 
     // Starts again with others allowed or not.
@@ -99,6 +182,7 @@ internal static class StudyWebsite
     private static async Task StartCore()
     {
         var https = Https && AllowOthers && IsDomainName(HttpsDomain);
+        CertificateProblem = null;
         try
         {
             // With https, UseHttps names every port itself.
@@ -136,6 +220,7 @@ internal static class StudyWebsite
                 options.DomainNames = [HttpsDomain];
             })
             .PersistDataToDirectory(new DirectoryInfo(CertificateFolder), null);
+        builder.Logging.AddProvider(new CertificateLog());
         builder.WebHost.ConfigureKestrel(kestrel =>
         {
             kestrel.ListenAnyIP(Port);
@@ -243,6 +328,34 @@ internal static class StudyWebsite
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Kept for this run only.
+        }
+    }
+
+    // Keeps LettuceEncrypt's warnings and errors (Let's Encrypt could not reach
+    // the domain, too many certificates…) for the settings card.
+    private sealed class CertificateLog : ILoggerProvider, ILogger
+    {
+        public ILogger CreateLogger(string categoryName) =>
+            categoryName.StartsWith("LettuceEncrypt", StringComparison.Ordinal) ? this : Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Warning;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (!IsEnabled(logLevel))
+            {
+                return;
+            }
+
+            var text = formatter(state, exception) + (exception is null ? "" : $" {exception.Message}");
+            CertificateProblem = text.Length > 300 ? text[..300] + "…" : text;
+            Changed?.Invoke();
+        }
+
+        public void Dispose()
+        {
         }
     }
 
