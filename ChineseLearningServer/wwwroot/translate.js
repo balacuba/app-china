@@ -5,8 +5,11 @@
 // translation. The key stays in this browser: it is sent only to Google, never
 // to our server.
 //
-// Signed in with Google (and Gemini allowed), no key is needed: the server
-// asks Gemini with the learner's own Google access (/api/gemini/generate).
+// With Gemini allowed through Google (🔑 → “Cho phép Gemini qua Google”), no
+// key is needed: the server asks Gemini with the learner's own Google access
+// (/api/gemini/generate).
+
+import { GOOGLE_LOGO } from './app.js';
 
 // Always the newest Flash-Lite model on the free tier: it answers in a second or two.
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent';
@@ -67,11 +70,15 @@ const siteToken = () => localStorage.getItem('cl.token') ?? '';
 // Whether Gemini can be used through the learner's Google account: null until
 // the server has said.
 let throughGoogle = null;
+// Whether the learner can allow that (this server signs in with Google).
+let googleAvailable = false;
 
 async function checkGoogle() {
   try {
     const response = await fetch('/api/gemini/status', { headers: { Authorization: `Bearer ${siteToken()}` } });
-    throughGoogle = response.ok && (await response.json()).connected === true;
+    const status = response.ok ? await response.json() : {};
+    throughGoogle = status.connected === true;
+    googleAvailable = status.available === true;
   } catch {
     throughGoogle = false;
   }
@@ -108,7 +115,7 @@ function failure(status, body, viaGoogle) {
     throughGoogle = false;
     return new AiError(status === 403
       ? `Google chưa cho tài khoản này dùng Gemini qua trang học (${said || reason}). Tạm thời hãy dùng API key (nút 🔑).`
-      : `${said || 'Không dùng được Gemini qua tài khoản Google.'} Hoặc dùng API key (nút 🔑).`, true);
+      : `${said || 'Không dùng được Gemini qua tài khoản Google. Hãy bấm nút 🔑 → “Cho phép Gemini qua Google”.'} Hoặc dùng API key (nút 🔑).`, true);
   }
   if (body.includes('API_KEY_INVALID') || status === 401 || status === 403) {
     return new AiError('API key Gemini không hợp lệ hoặc không có quyền. Hãy kiểm tra lại key (nút 🔑).', true);
@@ -245,8 +252,11 @@ export function showTranslate(view, app) {
       <form class="body key-form" id="key-form" novalidate>
         <p>Trang này dùng Google Gemini miễn phí bằng API key của chính bạn. Lấy key tại
           <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Google AI Studio</a> (đăng nhập Google → “Create API key”), rồi dán vào đây.</p>
-        <p class="muted">Key chỉ được lưu trong trình duyệt này và chỉ gửi tới Google, không gửi lên máy chủ của trang học.
-          Đăng nhập trang học bằng Google (và đồng ý quyền Gemini) thì không cần key.</p>
+        <p class="muted">Key chỉ được lưu trong trình duyệt này và chỉ gửi tới Google, không gửi lên máy chủ của trang học.</p>
+        <div id="key-google" hidden>
+          <p class="muted">Hoặc không cần key: cho trang học dùng Gemini bằng tài khoản Google của bạn.</p>
+          <a class="google-link" href="/api/oauth/google/start?gemini=1&returnTo=%23%2Ftranslate">${GOOGLE_LOGO}<span>Cho phép Gemini qua Google</span></a>
+        </div>
         <input id="key-input" type="password" autocomplete="off" spellcheck="false" placeholder="AIza…">
         <p class="error" id="key-error"></p>
         <div class="controls" style="justify-content:flex-start">
@@ -294,6 +304,7 @@ export function showTranslate(view, app) {
   function openKey() {
     $('#key-input').value = loadKey();
     $('#key-error').textContent = '';
+    $('#key-google').hidden = !googleAvailable || throughGoogle === true;
     keyDialog.showModal();
   }
 
@@ -472,7 +483,7 @@ export function showTranslate(view, app) {
     setStatus('✅ Đã lưu API key. Bấm “Đoạn văn mới” để bắt đầu.');
   });
 
-  const NEEDS_KEY = 'Cần API key Gemini miễn phí: bấm nút 🔑 để nhập, hoặc đăng nhập bằng Google.';
+  const NEEDS_KEY = 'Cần API key Gemini miễn phí, hoặc cho phép Gemini qua tài khoản Google: bấm nút 🔑.';
   checkGoogle().then(connected => {
     if (page.busy !== null || (page.status && page.status !== NEEDS_KEY)) return;
     setStatus(connected ? '✅ Dùng Gemini qua tài khoản Google của bạn, không cần API key.' : loadKey() ? '' : NEEDS_KEY);

@@ -11,8 +11,9 @@ namespace ChineseLearningServer;
 // Google sends it back to /api/oauth/google/callback with a code, which is
 // swapped for tokens: the ID token says who it is (the Gmail account's account
 // here, made on first use), the refresh token is kept so Gemini can be used for
-// them later. The browser then gets a one-use ticket, which the website trades
-// for a sign-in (/api/login/ticket), so no token ever sits in an address.
+// them later, if they allowed it (?gemini=0 asks only who they are). The
+// browser then gets a one-use ticket, which the website trades for a sign-in
+// (/api/login/ticket), so no token ever sits in an address.
 //
 // /api/gemini/generate passes a Gemini request on with the learner's own
 // Google access (refreshed as needed), for the website and the desktop app.
@@ -23,7 +24,7 @@ public static class GoogleEndpoints
     private const int MaxGeminiRequestBytes = 256 * 1024;
     private static readonly TimeSpan PendingLifetime = TimeSpan.FromMinutes(10);
 
-    private sealed record Pending(string ReturnTo, bool AskedConsent, DateTimeOffset Created);
+    private sealed record Pending(string ReturnTo, bool Gemini, bool AskedConsent, DateTimeOffset Created);
 
     private sealed record Ticket(long UserId, string UserName, string ReturnTo, DateTimeOffset Expires);
 
@@ -43,7 +44,7 @@ public static class GoogleEndpoints
         static string RedirectUri(HttpRequest request) =>
             $"{request.Scheme}://{request.Host}/api/oauth/google/callback";
 
-        api.MapGet("/oauth/google/start", (HttpContext context, [FromServices] IGoogleOAuth? google, string? returnTo) =>
+        api.MapGet("/oauth/google/start", (HttpContext context, [FromServices] IGoogleOAuth? google, string? returnTo, string? gemini) =>
         {
             if (google is null)
             {
@@ -52,7 +53,8 @@ public static class GoogleEndpoints
 
             Sweep(store);
             var state = NewSecret();
-            store.PendingSignIns[state] = new Pending(SafeReturn(returnTo), false, DateTimeOffset.UtcNow);
+            var withGemini = gemini is not ("0" or "false");
+            store.PendingSignIns[state] = new Pending(SafeReturn(returnTo), withGemini, false, DateTimeOffset.UtcNow);
             context.Response.Cookies.Append(StateCookie, state, new CookieOptions
             {
                 HttpOnly = true,
@@ -60,7 +62,7 @@ public static class GoogleEndpoints
                 Path = "/api/oauth",
                 MaxAge = PendingLifetime
             });
-            return Results.Redirect(google.AuthorizationUrl(RedirectUri(context.Request), state, askConsent: false));
+            return Results.Redirect(google.AuthorizationUrl(RedirectUri(context.Request), state, withGemini, askConsent: false));
         });
 
         api.MapGet("/oauth/google/callback", async (HttpContext context, [FromServices] IGoogleOAuth? google, IGoogleTokenValidator validator, Database db,
@@ -95,7 +97,10 @@ public static class GoogleEndpoints
                 return Results.Redirect("/#/?google=failed");
             }
 
-            if (!string.IsNullOrEmpty(tokens.RefreshToken))
+            // Signing in without Gemini (not asked, or unticked at Google) leaves
+            // an earlier Gemini permission as it is.
+            var allowedGemini = pending.Gemini && tokens.AllowsGemini;
+            if (allowedGemini && !string.IsNullOrEmpty(tokens.RefreshToken))
             {
                 db.SaveGeminiGrant(user.Id, tokens.RefreshToken);
                 if (tokens.AccessToken is { Length: > 0 })
@@ -103,7 +108,7 @@ public static class GoogleEndpoints
                     store.AccessTokens[user.Id] = (tokens.AccessToken, DateTimeOffset.UtcNow.AddSeconds(Math.Max(60, tokens.ExpiresIn - 60)));
                 }
             }
-            else if (db.LoadGeminiGrant(user.Id) is null && !pending.AskedConsent)
+            else if (allowedGemini && db.LoadGeminiGrant(user.Id) is null && !pending.AskedConsent)
             {
                 // Google gives a refresh token only when asked for consent: ask once more.
                 var again = NewSecret();
@@ -115,7 +120,7 @@ public static class GoogleEndpoints
                     Path = "/api/oauth",
                     MaxAge = PendingLifetime
                 });
-                return Results.Redirect(google.AuthorizationUrl(redirectUri, again, askConsent: true));
+                return Results.Redirect(google.AuthorizationUrl(redirectUri, again, gemini: true, askConsent: true));
             }
 
             context.Response.Cookies.Delete(StateCookie, new CookieOptions { Path = "/api/oauth" });
@@ -157,7 +162,7 @@ public static class GoogleEndpoints
             var access = await AccessToken(store, user.Id, db, google);
             if (access is null)
             {
-                return Auth.Problem("Tài khoản chưa cho phép dùng Gemini. Hãy đăng xuất rồi đăng nhập lại bằng Google và đồng ý quyền Gemini.",
+                return Auth.Problem("Tài khoản chưa cho phép dùng Gemini qua Google. Hãy bấm nút 🔑 → “Cho phép Gemini qua Google” và đánh dấu quyền Gemini.",
                     StatusCodes.Status412PreconditionFailed);
             }
 

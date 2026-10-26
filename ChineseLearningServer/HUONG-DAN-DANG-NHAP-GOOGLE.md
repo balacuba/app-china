@@ -10,7 +10,8 @@ Nút **Đăng nhập bằng Google** chỉ hiện khi máy chủ có *Client ID*
 4. Vào **APIs & Services → OAuth consent screen** (Google Auth Platform):
    - User type: **External** → Create.
    - App name: `Học tiếng Trung`, User support email và Developer contact: Gmail của bạn → Save.
-   - Ở **Audience → Test users**, thêm các Gmail sẽ dùng (khi app còn ở chế độ Testing chỉ các Gmail này đăng nhập được).
+   - Ở **Data access → Add or remove scopes**, thêm `.../auth/userinfo.email`, `openid`, `.../auth/cloud-platform` và `.../auth/generative-language.retriever` → Save.
+   - Ở **Audience**, bấm **Publish app** → Confirm (Publishing status: **In production**). Từ đó **mọi Gmail** đều đăng nhập được, không cần thêm vào Test users, và quyền Gemini không còn hết hạn sau 7 ngày. Xem mục *Giới hạn* bên dưới.
 5. Vào **Clients → Create client** (hoặc **Credentials → Create credentials → OAuth client ID**):
    - Application type: **Web application**.
    - **Authorized JavaScript origins**: `http://localhost:5080` và `http://localhost`.
@@ -40,13 +41,14 @@ Chỉ có Client ID mà không có Client secret thì vẫn đăng nhập Google
 
 ## 3. Dùng
 
-- **Web:** bấm **Đăng nhập bằng Google**, chọn Gmail, bấm **Tiếp tục/Cho phép** ở màn hình Google hỏi quyền (trong đó có quyền dùng Gemini). Lần đầu máy chủ tự tạo tài khoản mang tên chính Gmail đó. Vào **Dịch đoạn văn** sẽ thấy “Dùng Gemini qua tài khoản Google của bạn, không cần API key”.
+- **Web:** bấm **Đăng nhập bằng Google**, chọn Gmail, đánh dấu cả quyền Gemini (Google Cloud) rồi bấm **Tiếp tục** ở màn hình Google hỏi quyền. Bỏ đánh dấu quyền Gemini thì vẫn đăng nhập được, khi cần thì bấm nút 🔑 ở Dịch đoạn văn → **Cho phép Gemini qua Google**. Lần đầu máy chủ tự tạo tài khoản mang tên chính Gmail đó. Vào **Dịch đoạn văn** sẽ thấy “Dùng Gemini qua tài khoản Google của bạn, không cần API key”.
 - **App desktop:** Cài đặt → Đồng bộ với web → **Đăng nhập bằng Google**. App mở trình duyệt; đăng nhập Google (nếu chưa) rồi bấm **Cho phép**. App tự nhận đăng nhập, đồng bộ, và Dịch đoạn văn trong app cũng dùng Gemini qua máy chủ (máy chủ phải đang chạy).
 - Đã có API key thì vẫn dùng được: khi Gemini qua tài khoản Google không dùng được (đăng nhập bằng tên/mật khẩu, chưa cho quyền, máy chủ tắt…), web và app tự quay về dùng key.
 
 ## Giới hạn
 
 - Google chỉ cho đăng nhập trên trang `http://localhost…` hoặc trang `https://` có tên miền. Mở web từ điện thoại qua địa chỉ IP trong mạng nhà (`http://192.168.x.x:5080`) thì **không** dùng được nút Google; khi đó đăng nhập bằng tên và mật khẩu.
-- Khi app trên Google Cloud còn ở chế độ **Testing**: chỉ các Gmail trong Test users đăng nhập được, và quyền Gemini hết hạn sau **7 ngày** (lúc đó trang báo cần đăng nhập lại bằng Google). Muốn bỏ giới hạn này phải **Publish app**; vì quyền `cloud-platform` là quyền nhạy cảm, Google có thể yêu cầu xác minh app.
+- Khi app trên Google Cloud còn ở chế độ **Testing**: chỉ các Gmail trong Test users đăng nhập được, và quyền Gemini hết hạn sau **7 ngày**. Bấm **Publish app** (bước 1) để bỏ giới hạn này.
+- Sau khi Publish mà chưa được Google xác minh: vì quyền Gemini (`cloud-platform`) là quyền nhạy cảm, màn hình Google hiện **“Google hasn't verified this app”**. Người dùng bấm **Advanced → Go to Học tiếng Trung (unsafe)** để tiếp tục. Google cũng giới hạn app chưa xác minh ở **100 người dùng** có quyền nhạy cảm. Muốn bỏ cả cảnh báo và giới hạn 100 người thì gửi xác minh ở **Verification Center** (cần tên miền, trang chính sách quyền riêng tư và video demo).
 - Lượt dùng Gemini tính vào project Google Cloud của máy chủ (`hoc-tieng-trung`), theo hạn mức miễn phí của Google.
 - Tài khoản tạo bằng Google không có mật khẩu: luôn đăng nhập bằng Google.

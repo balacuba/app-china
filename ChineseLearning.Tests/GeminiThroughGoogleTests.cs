@@ -51,9 +51,9 @@ public sealed class GeminiThroughGoogleTests : IDisposable
         System.Web.HttpUtility.ParseQueryString(address.Query)[name] ?? "";
 
     // Start, "come back from Google" with a code, and return where the browser lands.
-    private static async Task<Uri> SignInAtGoogle(HttpClient browser, string code = "good")
+    private static async Task<Uri> SignInAtGoogle(HttpClient browser, string code = "good", bool gemini = true)
     {
-        var start = await browser.GetAsync("/api/oauth/google/start?returnTo=%23%2Ftranslate");
+        var start = await browser.GetAsync($"/api/oauth/google/start?returnTo=%23%2Ftranslate{(gemini ? "" : "&gemini=0")}");
         Assert.Equal(HttpStatusCode.Redirect, start.StatusCode);
         var state = Query(start.Headers.Location!, "state");
         var back = await browser.GetAsync($"/api/oauth/google/callback?code={code}&state={state}");
@@ -89,6 +89,41 @@ public sealed class GeminiThroughGoogleTests : IDisposable
         Assert.Equal("lai.hoai@gmail.com", signedIn.UserName);
         Assert.Equal("#/translate", signedIn.ReturnTo);
         Assert.Equal(HttpStatusCode.Unauthorized, again.StatusCode);
+    }
+
+    [Fact]
+    public async Task SigningInWithGoogleAsksForGeminiToo()
+    {
+        var start = await Browser().GetAsync("/api/oauth/google/start?returnTo=%23%2F");
+
+        Assert.Equal("True", Query(start.Headers.Location!, "gemini"));
+    }
+
+    [Fact]
+    public async Task UntickingGeminiAtGoogleStillSignsIn()
+    {
+        var browser = Browser();
+        var landing = await SignInAtGoogle(browser, code: "no-gemini");
+        var signedIn = await Redeem(browser, landing);
+        browser.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", signedIn.Token);
+        var status = await browser.GetFromJsonAsync<Dictionary<string, bool>>("/api/gemini/status");
+
+        Assert.StartsWith("/#/google-done?ticket=", landing.OriginalString);
+        Assert.True(status!["available"]);
+        Assert.False(status["connected"]);
+    }
+
+    [Fact]
+    public async Task SigningInAgainKeepsGeminiAllowedEarlier()
+    {
+        var browser = Browser();
+        await Redeem(browser, await SignInAtGoogle(browser));
+        var signedIn = await Redeem(browser, await SignInAtGoogle(browser, code: "no-refresh", gemini: false));
+        browser.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", signedIn.Token);
+
+        var status = await browser.GetFromJsonAsync<Dictionary<string, bool>>("/api/gemini/status");
+
+        Assert.True(status!["connected"]);
     }
 
     [Fact]
@@ -159,17 +194,19 @@ public sealed class GeminiThroughGoogleTests : IDisposable
     }
 
     // "good": a refresh token that works; "short-lived": an access token that
-    // has already run out and a refresh token Google refuses; "no-refresh": none.
+    // has already run out and a refresh token Google refuses; "no-refresh": none;
+    // "no-gemini": the learner unticked Gemini.
     private sealed class FakeOAuth : IGoogleOAuth
     {
-        public string AuthorizationUrl(string redirectUri, string state, bool askConsent) =>
-            $"https://accounts.google.com/o/oauth2/v2/auth?state={state}&prompt={(askConsent ? "consent" : "select_account")}";
+        public string AuthorizationUrl(string redirectUri, string state, bool gemini, bool askConsent) =>
+            $"https://accounts.google.com/o/oauth2/v2/auth?state={state}&gemini={gemini}&prompt={(askConsent ? "consent" : "select_account")}";
 
         public Task<GoogleTokens?> ExchangeCodeAsync(string code, string redirectUri) => Task.FromResult<GoogleTokens?>(code switch
         {
             "good" => new GoogleTokens("id-token", "access-1", "refresh-good", 3600),
             "short-lived" => new GoogleTokens("id-token", null, "refresh-revoked", 0),
             "no-refresh" => new GoogleTokens("id-token", "access-1", null, 3600),
+            "no-gemini" => new GoogleTokens("id-token", "access-1", "refresh-good", 3600, "openid https://www.googleapis.com/auth/userinfo.email"),
             _ => null
         });
 
