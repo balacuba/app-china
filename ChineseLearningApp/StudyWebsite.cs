@@ -86,6 +86,29 @@ internal static class StudyWebsite
     private static int _watching;
     private static DateTime _lastAddressCheck = DateTime.MinValue;
 
+    // One restart at a time: the watch (following the WAN IP) and the
+    // settings card can both ask for one.
+    private static readonly SemaphoreSlim RestartGate = new(1, 1);
+
+    // Counts the runs, so a stopping run's certificate log cannot speak for the next one.
+    private static int _generation;
+
+    // Let's Encrypt allows only 5 failed checks of a domain per hour: the
+    // failures seen per domain, and until when it said to wait.
+    private static readonly Dictionary<string, List<DateTime>> Failures = new();
+    private static readonly Dictionary<string, DateTime> BlockedUntil = new();
+    private const int FailuresBeforeWaiting = 3;
+
+    // Self-signed certificates answered on 443 until Let's Encrypt issues the real one.
+    private static readonly Dictionary<string, System.Security.Cryptography.X509Certificates.X509Certificate2> Fallbacks = new();
+
+    // Until when the certificate for the domain is valid (null: none yet),
+    // read by the watch so the card never touches the files.
+    public static DateTime? CertificateValidUntil { get; private set; }
+
+    // Why https was asked for but is not served this run, or null.
+    public static string? HttpsOffReason { get; private set; }
+
     // Why the website is not running, or null.
     public static string? Problem { get; private set; }
 
@@ -105,8 +128,9 @@ internal static class StudyWebsite
     }
 
     // The https certificate on disk for the domain, newest first; null when
-    // Let's Encrypt has not issued one yet.
-    public static DateTime? CertificateExpires()
+    // Let's Encrypt has not issued one yet. Only the expiry is read: the key
+    // is loaded ephemerally, never into a key container.
+    private static DateTime? CertificateExpires()
     {
         try
         {
@@ -119,7 +143,8 @@ internal static class StudyWebsite
             DateTime? newest = null;
             foreach (var file in Directory.EnumerateFiles(folder, "*.pfx"))
             {
-                using var certificate = new System.Security.Cryptography.X509Certificates.X509Certificate2(file, (string?)null);
+                using var certificate = new System.Security.Cryptography.X509Certificates.X509Certificate2(file, (string?)null,
+                    System.Security.Cryptography.X509Certificates.X509KeyStorageFlags.EphemeralKeySet);
                 if (certificate.MatchesHostname(HttpsDomain) && certificate.NotAfter > DateTime.Now && (newest is null || certificate.NotAfter > newest))
                 {
                     newest = certificate.NotAfter;
@@ -162,14 +187,17 @@ internal static class StudyWebsite
                     {
                         _newDomain = null;
                         _newDomainSeen = 0;
-                        DomainChange = $"IP WAN đã đổi: địa chỉ https mới là https://{domain} (trước là {HttpsAddress}). " +
-                                       "Nhớ sửa địa chỉ này trong Google Cloud (Authorized JavaScript origins và redirect URIs).";
+                        var before = HttpsAddress;
                         await RestartAsync(AllowOthers, true, domain, HttpsEmail, auto: true).ConfigureAwait(false);
+                        DomainChange = $"IP WAN đã đổi: địa chỉ https mới là https://{domain} (trước là {before}). " +
+                                       "Nhớ sửa địa chỉ này trong Google Cloud (Authorized JavaScript origins và redirect URIs).";
+                        Changed?.Invoke();
                         return;
                     }
                 }
             }
 
+            CertificateValidUntil = CertificateExpires();
             Changed?.Invoke();
         }
         finally
@@ -185,15 +213,108 @@ internal static class StudyWebsite
     // `domain` (`auto`: picked from the WAN IP, so it follows it).
     public static async Task RestartAsync(bool allowOthers, bool https, string domain, string email, bool auto)
     {
-        AllowOthers = allowOthers;
-        Https = https;
-        HttpsDomain = domain.Trim().ToLowerInvariant();
-        HttpsEmail = email.Trim();
-        HttpsDomainAuto = auto;
-        SaveSettings();
-        await StopAsync().ConfigureAwait(false);
-        _starting = Task.Run(StartCore);
-        await _starting.ConfigureAwait(false);
+        await RestartGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            AllowOthers = allowOthers;
+            Https = https;
+            HttpsDomain = domain.Trim().ToLowerInvariant();
+            HttpsEmail = email.Trim();
+            HttpsDomainAuto = auto;
+            DomainChange = null;
+            _newDomain = null;
+            _newDomainSeen = 0;
+            SaveSettings();
+            await StopAsync().ConfigureAwait(false);
+            _starting = Task.Run(StartCore);
+            await _starting.ConfigureAwait(false);
+        }
+        finally
+        {
+            RestartGate.Release();
+        }
+    }
+
+    // Why asking Let's Encrypt for `domain` now would only add a failure (it
+    // allows 5 failed checks an hour), with when to try again; null when fine
+    // or when a valid certificate is already there.
+    public static string? CertificateWait(string domain)
+    {
+        domain = domain.Trim().ToLowerInvariant();
+        if (domain == HttpsDomain && CertificateValidUntil is not null)
+        {
+            return null;
+        }
+
+        lock (Failures)
+        {
+            if (BlockedUntil.TryGetValue(domain, out var until) && until > DateTime.Now)
+            {
+                return $"Let's Encrypt đang tạm khóa {domain} vì xác minh thất bại nhiều lần; thử lại sau {until:HH:mm dd/MM}.";
+            }
+
+            if (Failures.TryGetValue(domain, out var times))
+            {
+                times.RemoveAll(time => DateTime.Now - time > TimeSpan.FromHours(1));
+                if (times.Count >= FailuresBeforeWaiting)
+                {
+                    return $"Let's Encrypt đã không xác minh được {domain} {times.Count} lần trong 1 giờ (giới hạn 5 lần). " +
+                           $"Hãy kiểm tra cổng 80 từ 4G (mở http://{domain}/ phải ra trang học) rồi thử lại sau {times.Min().AddHours(1):HH:mm}.";
+                }
+            }
+        }
+
+        return null;
+    }
+
+    // What the certificate log said about `domain`: a failed check, or Let's
+    // Encrypt saying to wait ("retry after 2026-10-26 10:37:28 UTC").
+    private static void NoteCertificateLog(string domain, string text)
+    {
+        lock (Failures)
+        {
+            var retry = System.Text.RegularExpressions.Regex.Match(text, @"retry after (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) UTC");
+            if (retry.Success && DateTime.TryParse(retry.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeUniversal, out var until))
+            {
+                BlockedUntil[domain] = until;
+            }
+            else if (text.Contains("Failed to validate ownership", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!Failures.TryGetValue(domain, out var times))
+                {
+                    Failures[domain] = times = [];
+                }
+
+                times.Add(DateTime.Now);
+            }
+        }
+    }
+
+    // A self-signed certificate for `domain`, so 443 answers (with a browser
+    // warning) instead of hanging until Let's Encrypt issues the real one.
+    private static System.Security.Cryptography.X509Certificates.X509Certificate2 FallbackFor(string domain)
+    {
+        lock (Fallbacks)
+        {
+            if (Fallbacks.TryGetValue(domain, out var known))
+            {
+                return known;
+            }
+
+            using var key = System.Security.Cryptography.RSA.Create(2048);
+            var request = new System.Security.Cryptography.X509Certificates.CertificateRequest($"CN={domain}", key,
+                System.Security.Cryptography.HashAlgorithmName.SHA256, System.Security.Cryptography.RSASignaturePadding.Pkcs1);
+            var names = new System.Security.Cryptography.X509Certificates.SubjectAlternativeNameBuilder();
+            names.AddDnsName(domain);
+            request.CertificateExtensions.Add(names.Build());
+            using var made = request.CreateSelfSigned(DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(30));
+            // Windows' TLS needs the key in a key container, which an export and import gives it.
+            var certificate = new System.Security.Cryptography.X509Certificates.X509Certificate2(
+                made.Export(System.Security.Cryptography.X509Certificates.X509ContentType.Pfx));
+            Fallbacks[domain] = certificate;
+            return certificate;
+        }
     }
 
     public static async Task StopAsync()
@@ -213,16 +334,33 @@ internal static class StudyWebsite
 
     private static async Task StartCore()
     {
-        var https = Https && AllowOthers && IsDomainName(HttpsDomain) && IsEmail(HttpsEmail);
+        var generation = Interlocked.Increment(ref _generation);
+        HttpsOffReason = !Https || !AllowOthers ? null
+            : !IsDomainName(HttpsDomain) ? "https chưa bật: tên miền chưa hợp lệ. Nhập tên miền (hoặc để trống để tự lấy) rồi bấm “Áp dụng”."
+            : !IsEmail(HttpsEmail) ? "https chưa bật: Let's Encrypt cần một email để cấp chứng chỉ. Nhập email rồi bấm “Áp dụng”."
+            : Port == 443 ? "https chưa bật: cổng trang web đang là 443, trùng cổng https. Đổi Port trong website-settings.json sang cổng khác (ví dụ 5080)."
+            : null;
+        var https = Https && AllowOthers && HttpsOffReason is null;
         CertificateProblem = null;
+        CertificateValidUntil = https ? CertificateExpires() : null;
+        ServesHttps = false;
         try
         {
             // With https, UseHttps names every port itself.
             var app = StudyServer.Create(https
                 ? ["--Logging:LogLevel:Default", "Warning"]
                 : ["--urls", AllowOthers ? $"http://*:{Port}" : $"http://localhost:{Port}", "--Logging:LogLevel:Default", "Warning"],
-                installed: true, https ? UseHttps : null);
-            await app.StartAsync().ConfigureAwait(false);
+                installed: true, https ? builder => UseHttps(builder, generation) : null);
+            try
+            {
+                await app.StartAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+                await app.DisposeAsync().ConfigureAwait(false);
+                throw;
+            }
+
             _app = app;
             ServesHttps = https;
             Problem = null;
@@ -244,20 +382,26 @@ internal static class StudyWebsite
 
     // Ports 80 (http, where Let's Encrypt checks the domain) and 443 (https,
     // with the certificate it issues), besides the usual port.
-    private static void UseHttps(WebApplicationBuilder builder)
+    private static void UseHttps(WebApplicationBuilder builder, int generation)
     {
+        var domain = HttpsDomain;
         builder.Services.AddLettuceEncrypt(options =>
             {
                 options.AcceptTermsOfService = true;
-                options.DomainNames = [HttpsDomain];
+                options.DomainNames = [domain];
                 options.EmailAddress = HttpsEmail;
+                options.FallbackCertificate = FallbackFor(domain);
             })
             .PersistDataToDirectory(new DirectoryInfo(CertificateFolder), null);
-        builder.Logging.AddProvider(new CertificateLog());
+        builder.Logging.AddProvider(new CertificateLog(generation, domain));
         builder.WebHost.ConfigureKestrel(kestrel =>
         {
-            kestrel.ListenAnyIP(Port);
-            kestrel.ListenAnyIP(80);
+            // The usual port may itself be 80.
+            foreach (var port in new[] { Port, 80 }.Distinct())
+            {
+                kestrel.ListenAnyIP(port);
+            }
+
             kestrel.ListenAnyIP(443, listen => listen.UseHttps(https => https.UseLettuceEncrypt(kestrel.ApplicationServices)));
         });
     }
@@ -370,8 +514,9 @@ internal static class StudyWebsite
     }
 
     // Keeps LettuceEncrypt's warnings and errors (Let's Encrypt could not reach
-    // the domain, too many certificates…) for the settings card.
-    private sealed class CertificateLog : ILoggerProvider, ILogger
+    // the domain, too many certificates…) for the settings card, for the run
+    // it belongs to only: a run being stopped may still log about its domain.
+    private sealed class CertificateLog(int generation, string domain) : ILoggerProvider, ILogger
     {
         public ILogger CreateLogger(string categoryName) =>
             categoryName.StartsWith("LettuceEncrypt", StringComparison.Ordinal) ? this : Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
@@ -388,6 +533,12 @@ internal static class StudyWebsite
             }
 
             var text = formatter(state, exception) + (exception is null ? "" : $" {exception.Message}");
+            NoteCertificateLog(domain, text);
+            if (generation != Volatile.Read(ref _generation))
+            {
+                return;
+            }
+
             CertificateProblem = text.Length > 300 ? text[..300] + "…" : text;
             Changed?.Invoke();
         }

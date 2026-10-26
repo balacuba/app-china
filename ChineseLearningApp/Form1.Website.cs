@@ -72,9 +72,18 @@ public sealed partial class Form1
         };
         var httpsRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, BackColor = SurfaceColor, Margin = new Padding(0, 0, 0, 6) };
 
-        // Typed into by the learner since the last "Áp dụng": the domain is then theirs, fixed.
+        // Typed into by the learner since the last "Áp dụng": the domain is then
+        // theirs, fixed, and refreshes leave the box alone.
         var domainTyped = false;
         domain.TextChanged += (_, _) => domainTyped |= domain.Focused;
+
+        // While a restart asked for here runs, the https row stays disabled
+        // (refreshes during it must not re-enable it).
+        var applying = false;
+
+        // The WAN IP change last written into the note, so refreshes do not
+        // write it again over other messages.
+        string? shownChange = null;
 
         string HttpsNote() =>
             (StudyWebsite.FollowsInternetAddress
@@ -96,33 +105,35 @@ public sealed partial class Form1
                   $"\nTừ Internet:  {internetAddress ?? "bấm “Xem địa chỉ Internet”"}" +
                   (StudyWebsite.ServesHttps ? $"\nQua https (đăng nhập Google được):  {StudyWebsite.HttpsAddress}" : "")
                 : "\n(Chỉ máy này mở được trang web.)");
-            httpsRow.Enabled = StudyWebsite.AllowOthers;
+            httpsRow.Enabled = StudyWebsite.AllowOthers && !applying;
 
             // The https certificate: valid until when, or why there is none yet.
-            var needsEmail = StudyWebsite.Https && StudyWebsite.AllowOthers && !StudyWebsite.IsEmail(StudyWebsite.HttpsEmail);
-            certificate.Visible = (StudyWebsite.ServesHttps || needsEmail) && StudyWebsite.Running;
-            if (needsEmail)
+            var offReason = StudyWebsite.HttpsOffReason;
+            certificate.Visible = (StudyWebsite.ServesHttps || offReason is not null) && StudyWebsite.Running;
+            if (offReason is not null)
             {
-                (certificate.Text, certificate.ForeColor) =
-                    ("⚠ https chưa bật: Let's Encrypt cần một email để cấp chứng chỉ. Nhập email rồi bấm “Áp dụng”.", DangerText);
+                (certificate.Text, certificate.ForeColor) = ($"⚠ {offReason}", DangerText);
             }
             else if (certificate.Visible)
             {
-                var expires = StudyWebsite.CertificateExpires();
-                (certificate.Text, certificate.ForeColor) = expires is { } until
+                (certificate.Text, certificate.ForeColor) = StudyWebsite.CertificateValidUntil is { } until
                     ? ($"🔒 Chứng chỉ https hợp lệ đến {until:dd/MM/yyyy} (tự gia hạn).", SuccessColor)
                     : StudyWebsite.CertificateProblem is { } why
-                        ? ($"⚠ Chưa có chứng chỉ https. Let's Encrypt báo: {why}\nKiểm tra router đã chuyển cổng 80 và 443 (TCP) về máy này, và tường lửa đã mở.", DangerText)
+                        ? ($"⚠ Chưa có chứng chỉ https (tạm dùng chứng chỉ tự ký, trình duyệt sẽ cảnh báo). Let's Encrypt báo: {why}\n" +
+                           "Kiểm tra router đã chuyển cổng 80 và 443 (TCP) về máy này, và tường lửa đã mở.", DangerText)
                         : ("⏳ Đang xin chứng chỉ https từ Let's Encrypt… (cần router chuyển cổng 80 và 443 về máy này)", MutedTextColor);
             }
 
-            if (StudyWebsite.DomainChange is { } change)
+            if (StudyWebsite.DomainChange is { } change && change != shownChange)
             {
                 note.Text = change;
             }
 
-            // An sslip.io name may have followed a new WAN IP.
-            if (!domain.Focused)
+            shownChange = StudyWebsite.DomainChange;
+
+            // An sslip.io name may have followed a new WAN IP; a domain being
+            // typed (and not applied yet) is left as it is.
+            if (!domain.Focused && !domainTyped)
             {
                 domain.Text = StudyWebsite.HttpsDomain;
             }
@@ -132,8 +143,29 @@ public sealed partial class Form1
         // IP's sslip.io name unless one is typed in.
         async Task ApplyHttps()
         {
+            if (applying)
+            {
+                return;
+            }
+
+            applying = true;
             httpsRow.Enabled = false;
             allowOthers.Enabled = false;
+            try
+            {
+                await ApplyHttpsCore();
+            }
+            finally
+            {
+                applying = false;
+                httpsRow.Enabled = StudyWebsite.AllowOthers;
+                allowOthers.Enabled = true;
+                Show();
+            }
+        }
+
+        async Task ApplyHttpsCore()
+        {
             var name = domain.Text.Trim().ToLowerInvariant();
             var filledIn = false;
             if (https.Checked && name.Length == 0)
@@ -150,8 +182,6 @@ public sealed partial class Form1
                     ? "⚠ Không lấy được địa chỉ Internet. Kiểm tra mạng, hoặc gõ tên miền (ví dụ ten-ban.duckdns.org)."
                     : "⚠ Tên miền không hợp lệ (ví dụ 14-241-68-10.sslip.io hoặc ten-ban.duckdns.org).";
                 https.Checked = false;
-                httpsRow.Enabled = true;
-                allowOthers.Enabled = true;
                 return;
             }
 
@@ -164,27 +194,29 @@ public sealed partial class Form1
                 note.Text = address.Length == 0
                     ? "⚠ Nhập email của bạn rồi bấm “Áp dụng”: Let's Encrypt cần email để cấp chứng chỉ https."
                     : "⚠ Email không hợp lệ.";
-                httpsRow.Enabled = true;
-                allowOthers.Enabled = true;
-                Show();
                 email.Focus();
+                return;
+            }
+
+            // Restarting asks Let's Encrypt again; after repeated failures that
+            // only spends the few tries it allows an hour.
+            if (https.Checked && StudyWebsite.CertificateWait(name) is { } wait)
+            {
+                note.Text = $"⚠ Chưa khởi động lại: {wait}";
                 return;
             }
 
             status.Text = "⏳ Đang khởi động lại trang web…";
             await StudyWebsite.RestartAsync(StudyWebsite.AllowOthers, https.Checked, name, address, auto);
             domainTyped = false;
-            note.Text = StudyWebsite.ServesHttps ? HttpsNote() : "Đã tắt https.";
-            httpsRow.Enabled = true;
-            allowOthers.Enabled = true;
-            Show();
+            note.Text = StudyWebsite.ServesHttps ? HttpsNote() : StudyWebsite.Https ? "" : "Đã tắt https.";
         }
 
         var applyHttps = CreateButton("Áp dụng", async (_, _) => await ApplyHttps(), secondary: true);
         applyHttps.Margin = Padding.Empty;
         https.CheckedChanged += async (_, _) =>
         {
-            if (httpsRow.Enabled && https.Checked != StudyWebsite.Https)
+            if (!applying && https.Checked != StudyWebsite.Https)
             {
                 await ApplyHttps();
             }
@@ -204,11 +236,20 @@ public sealed partial class Form1
 
         allowOthers.CheckedChanged += async (_, _) =>
         {
+            applying = true;
             allowOthers.Enabled = false;
+            httpsRow.Enabled = false;
             status.Text = "⏳ Đang khởi động lại trang web…";
-            await StudyWebsite.RestartAsync(allowOthers.Checked);
-            allowOthers.Enabled = true;
-            Show();
+            try
+            {
+                await StudyWebsite.RestartAsync(allowOthers.Checked);
+            }
+            finally
+            {
+                applying = false;
+                allowOthers.Enabled = true;
+                Show();
+            }
         };
 
         var buttons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, BackColor = SurfaceColor, Margin = Padding.Empty };
