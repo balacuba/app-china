@@ -167,7 +167,7 @@ public sealed partial class Form1
 
         // The installer replaces the app's files once it has closed (progress
         // is synced and saved on the way out as usual).
-        Close();
+        ExitApp();
     }
 
     // Settings card: this version, "Kiểm tra cập nhật", and checking on start.

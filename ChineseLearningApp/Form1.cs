@@ -313,6 +313,7 @@ public sealed partial class Form1 : Form
         // Registered first, so its last sync on close lands before the state is saved.
         InitializeSync();
         InitializeUpdates();
+        InitializeTray();
         // Only study data carries over; the app always opens on Home.
         var appState = AppState.Load();
         _correctAnswerCount = Math.Max(0, appState.CorrectAnswers);
