@@ -72,7 +72,14 @@ public sealed partial class Form1
         };
         var httpsRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, BackColor = SurfaceColor, Margin = new Padding(0, 0, 0, 6) };
 
+        // Typed into by the learner since the last "Áp dụng": the domain is then theirs, fixed.
+        var domainTyped = false;
+        domain.TextChanged += (_, _) => domainTyped |= domain.Focused;
+
         string HttpsNote() =>
+            (StudyWebsite.FollowsInternetAddress
+                ? "Tên miền tự đổi theo IP WAN (khi thấy IP mới ổn định khoảng 30 phút). Muốn giữ cố định thì gõ tên miền vào ô rồi bấm “Áp dụng”.\n"
+                : "Tên miền cố định như đã gõ. Muốn tự theo IP WAN thì xóa trống ô tên miền rồi bấm “Áp dụng”.\n") +
             $"https: router cần chuyển thêm cổng 80 và 443 (TCP) về máy này; lần đầu mở {StudyWebsite.HttpsAddress}, chứng chỉ Let's Encrypt " +
             "được xin tự động (khoảng 1 phút). Để đăng nhập Google: trong Google Cloud thêm " +
             $"{StudyWebsite.HttpsAddress} vào Authorized JavaScript origins và {StudyWebsite.HttpsAddress}/api/oauth/google/callback vào Authorized redirect URIs.";
@@ -128,11 +135,13 @@ public sealed partial class Form1
             httpsRow.Enabled = false;
             allowOthers.Enabled = false;
             var name = domain.Text.Trim().ToLowerInvariant();
+            var filledIn = false;
             if (https.Checked && name.Length == 0)
             {
                 status.Text = "⏳ Đang lấy tên miền theo địa chỉ Internet…";
                 name = await StudyWebsite.DomainForInternetAddressAsync() ?? "";
                 domain.Text = name;
+                filledIn = true;
             }
 
             if (https.Checked && !StudyWebsite.IsDomainName(name))
@@ -146,6 +155,9 @@ public sealed partial class Form1
                 return;
             }
 
+            // Left empty (filled in from the WAN IP), the domain follows the IP;
+            // typed in, it stays as typed.
+            var auto = filledIn || (!domainTyped && name == StudyWebsite.HttpsDomain && StudyWebsite.HttpsDomainAuto);
             var address = email.Text.Trim();
             if (https.Checked && !StudyWebsite.IsEmail(address))
             {
@@ -160,7 +172,8 @@ public sealed partial class Form1
             }
 
             status.Text = "⏳ Đang khởi động lại trang web…";
-            await StudyWebsite.RestartAsync(StudyWebsite.AllowOthers, https.Checked, name, address);
+            await StudyWebsite.RestartAsync(StudyWebsite.AllowOthers, https.Checked, name, address, auto);
+            domainTyped = false;
             note.Text = StudyWebsite.ServesHttps ? HttpsNote() : "Đã tắt https.";
             httpsRow.Enabled = true;
             allowOthers.Enabled = true;

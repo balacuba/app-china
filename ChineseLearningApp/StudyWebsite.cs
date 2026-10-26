@@ -56,8 +56,21 @@ internal static class StudyWebsite
 
     public static string HttpsAddress => $"https://{HttpsDomain}";
 
-    // An <IP>.sslip.io name, which follows the WAN IP when it changes.
-    public static bool FollowsInternetAddress => HttpsDomain.EndsWith(".sslip.io", StringComparison.Ordinal);
+    // Whether the domain was filled in from the WAN IP (the box left empty),
+    // rather than typed in: only such a domain follows the IP.
+    public static bool HttpsDomainAuto { get; private set; } = true;
+
+    // An <IP>.sslip.io name picked from the WAN IP, which follows it when it changes.
+    public static bool FollowsInternetAddress => HttpsDomainAuto && HttpsDomain.EndsWith(".sslip.io", StringComparison.Ordinal);
+
+    // How many checks in a row (ten minutes apart) must see the same new WAN IP
+    // before the domain follows it. A network with two Internet lines can show
+    // either address from one check to the next; following each would restart
+    // the website and its certificate request every time.
+    internal static int ChecksBeforeFollowing { get; set; } = 3;
+
+    private static string? _newDomain;
+    private static int _newDomainSeen;
 
     // What Let's Encrypt (through LettuceEncrypt) last said went wrong, or null.
     public static string? CertificateProblem { get; private set; }
@@ -135,12 +148,25 @@ internal static class StudyWebsite
             if (FollowsInternetAddress && DateTime.Now - _lastAddressCheck > TimeSpan.FromMinutes(10))
             {
                 _lastAddressCheck = DateTime.Now;
-                if (await CurrentDomain().ConfigureAwait(false) is { } domain && domain != HttpsDomain)
+                var domain = await CurrentDomain().ConfigureAwait(false);
+                if (domain is null || domain == HttpsDomain)
                 {
-                    DomainChange = $"IP WAN đã đổi: địa chỉ https mới là https://{domain} (trước là {HttpsAddress}). " +
-                                   "Nhớ sửa địa chỉ này trong Google Cloud (Authorized JavaScript origins và redirect URIs).";
-                    await RestartAsync(AllowOthers, true, domain, HttpsEmail).ConfigureAwait(false);
-                    return;
+                    _newDomain = null;
+                    _newDomainSeen = 0;
+                }
+                else
+                {
+                    _newDomainSeen = domain == _newDomain ? _newDomainSeen + 1 : 1;
+                    _newDomain = domain;
+                    if (_newDomainSeen >= ChecksBeforeFollowing)
+                    {
+                        _newDomain = null;
+                        _newDomainSeen = 0;
+                        DomainChange = $"IP WAN đã đổi: địa chỉ https mới là https://{domain} (trước là {HttpsAddress}). " +
+                                       "Nhớ sửa địa chỉ này trong Google Cloud (Authorized JavaScript origins và redirect URIs).";
+                        await RestartAsync(AllowOthers, true, domain, HttpsEmail, auto: true).ConfigureAwait(false);
+                        return;
+                    }
                 }
             }
 
@@ -153,15 +179,17 @@ internal static class StudyWebsite
     }
 
     // Starts again with others allowed or not.
-    public static Task RestartAsync(bool allowOthers) => RestartAsync(allowOthers, Https, HttpsDomain, HttpsEmail);
+    public static Task RestartAsync(bool allowOthers) => RestartAsync(allowOthers, Https, HttpsDomain, HttpsEmail, HttpsDomainAuto);
 
-    // Starts again with others allowed or not, and https on or off for `domain`.
-    public static async Task RestartAsync(bool allowOthers, bool https, string domain, string email)
+    // Starts again with others allowed or not, and https on or off for
+    // `domain` (`auto`: picked from the WAN IP, so it follows it).
+    public static async Task RestartAsync(bool allowOthers, bool https, string domain, string email, bool auto)
     {
         AllowOthers = allowOthers;
         Https = https;
         HttpsDomain = domain.Trim().ToLowerInvariant();
         HttpsEmail = email.Trim();
+        HttpsDomainAuto = auto;
         SaveSettings();
         await StopAsync().ConfigureAwait(false);
         _starting = Task.Run(StartCore);
@@ -319,6 +347,7 @@ internal static class StudyWebsite
                 Https = settings.Https;
                 HttpsDomain = settings.HttpsDomain ?? string.Empty;
                 HttpsEmail = settings.HttpsEmail ?? string.Empty;
+                HttpsDomainAuto = settings.HttpsDomainAuto ?? true;
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
@@ -332,7 +361,7 @@ internal static class StudyWebsite
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
-            File.WriteAllText(SettingsPath, JsonSerializer.Serialize(new Settings(Port, AllowOthers, Https, HttpsDomain, HttpsEmail)), new UTF8Encoding(false));
+            File.WriteAllText(SettingsPath, JsonSerializer.Serialize(new Settings(Port, AllowOthers, Https, HttpsDomain, HttpsEmail, HttpsDomainAuto)), new UTF8Encoding(false));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -368,5 +397,6 @@ internal static class StudyWebsite
         }
     }
 
-    private sealed record Settings(int Port, bool AllowOthers, bool Https = false, string? HttpsDomain = null, string? HttpsEmail = null);
+    private sealed record Settings(int Port, bool AllowOthers, bool Https = false, string? HttpsDomain = null, string? HttpsEmail = null,
+        bool? HttpsDomainAuto = null);
 }
