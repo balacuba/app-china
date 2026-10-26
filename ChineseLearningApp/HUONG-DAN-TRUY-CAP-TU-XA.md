@@ -37,7 +37,7 @@ Bấm **🌐 Mở trang web**, hoặc mở trình duyệt vào `http://localhost
 Google không cho đăng nhập trên trang mở bằng địa chỉ IP hay bằng `http`. App có sẵn https miễn phí theo tên miền **`<IP WAN có gạch ngang>.sslip.io`**: tên này luôn trỏ về IP WAN, không phải đăng ký. Ví dụ IP `14.241.68.10` thì tên miền là `14-241-68-10.sslip.io`.
 
 1. Trên router, chuyển thêm **cổng 80 và 443 (TCP)** về máy chạy app, cùng cách với cổng `5080` ở mục 3. Ví dụ cổng ngoài `443` vào cổng trong `443`.
-2. Trong app vào **Cài đặt → Trang web học**, tích **Bật https**. Để trống ô tên miền thì app tự điền theo IP WAN; có tên miền riêng (DuckDNS, No-IP…) thì gõ vào rồi bấm **Áp dụng**.
+2. Trong app vào **Cài đặt → Trang web học**, tích **Bật https**. Để trống ô tên miền thì app tự điền theo IP WAN; có tên miền riêng (DuckDNS, No-IP…) thì gõ vào. Nhập **Email** của bạn (Let's Encrypt bắt buộc có email để cấp chứng chỉ), rồi bấm **Áp dụng**.
 3. Bấm **🛡 Mở cổng tường lửa**: Windows sẽ cho phép cả cổng 80 và 443.
 4. Mở `https://14-241-68-10.sslip.io` (thay bằng tên miền của bạn) từ mạng khác. Lần đầu, app tự xin chứng chỉ Let's Encrypt miễn phí (khoảng 1 phút) và tự gia hạn sau đó.
 5. Để đăng nhập Google qua địa chỉ này: trong Google Cloud → client OAuth, thêm `https://14-241-68-10.sslip.io` vào **Authorized JavaScript origins** và `https://14-241-68-10.sslip.io/api/oauth/google/callback` vào **Authorized redirect URIs**.

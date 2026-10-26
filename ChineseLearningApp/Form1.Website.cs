@@ -38,7 +38,7 @@ public sealed partial class Form1
         {
             AutoSize = true,
             Checked = StudyWebsite.Https,
-            Text = "Bật https (để đăng nhập Google từ xa), tên miền:",
+            Text = "Bật https (đăng nhập Google từ xa), tên miền:",
             Font = new Font(UiFontName, 10.5F),
             ForeColor = BodyTextColor,
             BackColor = SurfaceColor,
@@ -46,9 +46,27 @@ public sealed partial class Form1
         };
         var domain = new TextBox
         {
-            Width = 300,
+            Width = 250,
             Text = StudyWebsite.HttpsDomain,
             PlaceholderText = "tự lấy từ IP WAN (…sslip.io)",
+            Font = new Font(UiFontName, 10.5F),
+            Margin = new Padding(0, 3, 10, 0)
+        };
+        // Let's Encrypt refuses to issue certificates to an account without one.
+        var emailLabel = new Label
+        {
+            AutoSize = true,
+            Text = "Email:",
+            Font = new Font(UiFontName, 10.5F),
+            ForeColor = BodyTextColor,
+            BackColor = SurfaceColor,
+            Margin = new Padding(0, 6, 4, 0)
+        };
+        var email = new TextBox
+        {
+            Width = 230,
+            Text = StudyWebsite.HttpsEmail,
+            PlaceholderText = "email nhận tin về chứng chỉ",
             Font = new Font(UiFontName, 10.5F),
             Margin = new Padding(0, 3, 6, 0)
         };
@@ -74,8 +92,14 @@ public sealed partial class Form1
             httpsRow.Enabled = StudyWebsite.AllowOthers;
 
             // The https certificate: valid until when, or why there is none yet.
-            certificate.Visible = StudyWebsite.ServesHttps && StudyWebsite.Running;
-            if (certificate.Visible)
+            var needsEmail = StudyWebsite.Https && StudyWebsite.AllowOthers && !StudyWebsite.IsEmail(StudyWebsite.HttpsEmail);
+            certificate.Visible = (StudyWebsite.ServesHttps || needsEmail) && StudyWebsite.Running;
+            if (needsEmail)
+            {
+                (certificate.Text, certificate.ForeColor) =
+                    ("⚠ https chưa bật: Let's Encrypt cần một email để cấp chứng chỉ. Nhập email rồi bấm “Áp dụng”.", DangerText);
+            }
+            else if (certificate.Visible)
             {
                 var expires = StudyWebsite.CertificateExpires();
                 (certificate.Text, certificate.ForeColor) = expires is { } until
@@ -122,8 +146,21 @@ public sealed partial class Form1
                 return;
             }
 
+            var address = email.Text.Trim();
+            if (https.Checked && !StudyWebsite.IsEmail(address))
+            {
+                note.Text = address.Length == 0
+                    ? "⚠ Nhập email của bạn rồi bấm “Áp dụng”: Let's Encrypt cần email để cấp chứng chỉ https."
+                    : "⚠ Email không hợp lệ.";
+                httpsRow.Enabled = true;
+                allowOthers.Enabled = true;
+                Show();
+                email.Focus();
+                return;
+            }
+
             status.Text = "⏳ Đang khởi động lại trang web…";
-            await StudyWebsite.RestartAsync(StudyWebsite.AllowOthers, https.Checked, name);
+            await StudyWebsite.RestartAsync(StudyWebsite.AllowOthers, https.Checked, name, address);
             note.Text = StudyWebsite.ServesHttps ? HttpsNote() : "Đã tắt https.";
             httpsRow.Enabled = true;
             allowOthers.Enabled = true;
@@ -139,7 +176,7 @@ public sealed partial class Form1
                 await ApplyHttps();
             }
         };
-        httpsRow.Controls.AddRange([https, domain, applyHttps]);
+        httpsRow.Controls.AddRange([https, domain, emailLabel, email, applyHttps]);
 
         void Refresh()
         {

@@ -46,6 +46,9 @@ internal static class StudyWebsite
     public static bool AllowOthers { get; private set; } = true;
     public static bool Https { get; private set; }
     public static string HttpsDomain { get; private set; } = string.Empty;
+
+    // Let's Encrypt needs an email address for the account it issues certificates to.
+    public static string HttpsEmail { get; private set; } = string.Empty;
     public static bool Running => _app is not null;
 
     // Whether this run answers over https (on, others allowed, a domain set).
@@ -136,7 +139,7 @@ internal static class StudyWebsite
                 {
                     DomainChange = $"IP WAN đã đổi: địa chỉ https mới là https://{domain} (trước là {HttpsAddress}). " +
                                    "Nhớ sửa địa chỉ này trong Google Cloud (Authorized JavaScript origins và redirect URIs).";
-                    await RestartAsync(AllowOthers, true, domain).ConfigureAwait(false);
+                    await RestartAsync(AllowOthers, true, domain, HttpsEmail).ConfigureAwait(false);
                     return;
                 }
             }
@@ -150,14 +153,15 @@ internal static class StudyWebsite
     }
 
     // Starts again with others allowed or not.
-    public static Task RestartAsync(bool allowOthers) => RestartAsync(allowOthers, Https, HttpsDomain);
+    public static Task RestartAsync(bool allowOthers) => RestartAsync(allowOthers, Https, HttpsDomain, HttpsEmail);
 
     // Starts again with others allowed or not, and https on or off for `domain`.
-    public static async Task RestartAsync(bool allowOthers, bool https, string domain)
+    public static async Task RestartAsync(bool allowOthers, bool https, string domain, string email)
     {
         AllowOthers = allowOthers;
         Https = https;
         HttpsDomain = domain.Trim().ToLowerInvariant();
+        HttpsEmail = email.Trim();
         SaveSettings();
         await StopAsync().ConfigureAwait(false);
         _starting = Task.Run(StartCore);
@@ -181,7 +185,7 @@ internal static class StudyWebsite
 
     private static async Task StartCore()
     {
-        var https = Https && AllowOthers && IsDomainName(HttpsDomain);
+        var https = Https && AllowOthers && IsDomainName(HttpsDomain) && IsEmail(HttpsEmail);
         CertificateProblem = null;
         try
         {
@@ -218,6 +222,7 @@ internal static class StudyWebsite
             {
                 options.AcceptTermsOfService = true;
                 options.DomainNames = [HttpsDomain];
+                options.EmailAddress = HttpsEmail;
             })
             .PersistDataToDirectory(new DirectoryInfo(CertificateFolder), null);
         builder.Logging.AddProvider(new CertificateLog());
@@ -228,6 +233,9 @@ internal static class StudyWebsite
             kestrel.ListenAnyIP(443, listen => listen.UseHttps(https => https.UseLettuceEncrypt(kestrel.ApplicationServices)));
         });
     }
+
+    public static bool IsEmail(string text) =>
+        System.Net.Mail.MailAddress.TryCreate(text, out var address) && address.Address == text && IsDomainName(address.Host);
 
     public static bool IsDomainName(string text) =>
         Uri.CheckHostName(text) == UriHostNameType.Dns && text.Contains('.') && !text.EndsWith('.');
@@ -310,6 +318,7 @@ internal static class StudyWebsite
                 AllowOthers = settings.AllowOthers;
                 Https = settings.Https;
                 HttpsDomain = settings.HttpsDomain ?? string.Empty;
+                HttpsEmail = settings.HttpsEmail ?? string.Empty;
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
@@ -323,7 +332,7 @@ internal static class StudyWebsite
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
-            File.WriteAllText(SettingsPath, JsonSerializer.Serialize(new Settings(Port, AllowOthers, Https, HttpsDomain)), new UTF8Encoding(false));
+            File.WriteAllText(SettingsPath, JsonSerializer.Serialize(new Settings(Port, AllowOthers, Https, HttpsDomain, HttpsEmail)), new UTF8Encoding(false));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -359,5 +368,5 @@ internal static class StudyWebsite
         }
     }
 
-    private sealed record Settings(int Port, bool AllowOthers, bool Https = false, string? HttpsDomain = null);
+    private sealed record Settings(int Port, bool AllowOthers, bool Https = false, string? HttpsDomain = null, string? HttpsEmail = null);
 }
