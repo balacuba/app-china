@@ -120,29 +120,53 @@ public sealed class Database(string path)
         ? ProtectedData.Protect(Encoding.UTF8.GetBytes(text), null, DataProtectionScope.CurrentUser)
         : Encoding.UTF8.GetBytes(text);
 
-    // The account for a Google sign-in, made on first use with the Gmail
-    // address as its name. It has no usable password: it signs in with Google.
+    // The account for a Google sign-in, made on first use with the name on the
+    // Google account ("Lại Hoài", or "Lại Hoài 2" when taken; the Gmail address
+    // when Google gives no name). Accounts made earlier with the Gmail address as
+    // their name take the Google name on their next sign-in. A Google account
+    // has no usable password: it signs in with Google.
     public (long Id, string UserName) FindOrCreateGoogleUser(GoogleIdentity identity)
     {
         using var connection = Open();
-        using (var find = connection.CreateCommand())
+        var googleName = CleanGoogleName(identity.Name);
+
+        // Signed in with this Google account before.
+        if (QueryUser(connection, "SELECT Id, UserName FROM Users WHERE GoogleSub = $key", identity.Subject) is { } known)
         {
-            find.CommandText = "SELECT Id, UserName FROM Users WHERE GoogleSub = $sub";
-            find.Parameters.AddWithValue("$sub", identity.Subject);
-            using var reader = find.ExecuteReader();
-            if (reader.Read())
+            if (googleName is null || !string.Equals(known.UserName, identity.Email, StringComparison.OrdinalIgnoreCase))
             {
-                return (reader.GetInt64(0), reader.GetString(1));
+                return known;
+            }
+
+            var renamed = FreeName(connection, googleName, known.Id);
+            using var rename = connection.CreateCommand();
+            rename.CommandText = "UPDATE Users SET UserName = $name WHERE Id = $id";
+            rename.Parameters.AddWithValue("$name", renamed);
+            rename.Parameters.AddWithValue("$id", known.Id);
+            rename.ExecuteNonQuery();
+            return (known.Id, renamed);
+        }
+
+        // An account made with a password under this Gmail address becomes this
+        // Google account's, keeping its name.
+        using (var link = connection.CreateCommand())
+        {
+            link.CommandText = "UPDATE Users SET GoogleSub = $sub WHERE UserName = $email AND GoogleSub IS NULL RETURNING Id, UserName";
+            link.Parameters.AddWithValue("$sub", identity.Subject);
+            link.Parameters.AddWithValue("$email", identity.Email);
+            using var linked = link.ExecuteReader();
+            if (linked.Read())
+            {
+                return (linked.GetInt64(0), linked.GetString(1));
             }
         }
 
         using var create = connection.CreateCommand();
         create.CommandText = """
             INSERT INTO Users (UserName, PasswordHash, Salt, CreatedAt, GoogleSub) VALUES ($name, $hash, $salt, $now, $sub)
-            ON CONFLICT(UserName) DO UPDATE SET GoogleSub = $sub WHERE GoogleSub IS NULL
             RETURNING Id, UserName;
             """;
-        create.Parameters.AddWithValue("$name", identity.Email);
+        create.Parameters.AddWithValue("$name", FreeName(connection, googleName ?? identity.Email, null));
         create.Parameters.AddWithValue("$hash", RandomNumberGenerator.GetBytes(32));
         create.Parameters.AddWithValue("$salt", RandomNumberGenerator.GetBytes(16));
         create.Parameters.AddWithValue("$now", Now());
@@ -150,7 +174,40 @@ public sealed class Database(string path)
         using var created = create.ExecuteReader();
         return created.Read()
             ? (created.GetInt64(0), created.GetString(1))
-            : throw new InvalidOperationException("Địa chỉ Gmail này đã gắn với một tài khoản Google khác.");
+            : throw new InvalidOperationException("Không tạo được tài khoản cho tài khoản Google này.");
+    }
+
+    private static (long Id, string UserName)? QueryUser(SqliteConnection connection, string sql, string key)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        command.Parameters.AddWithValue("$key", key);
+        using var reader = command.ExecuteReader();
+        return reader.Read() ? (reader.GetInt64(0), reader.GetString(1)) : null;
+    }
+
+    // The Google name on one line, at most 40 characters; null when there is none.
+    private static string? CleanGoogleName(string? name)
+    {
+        var clean = string.Join(' ', (name ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return clean.Length == 0 ? null : clean.Length > 40 ? clean[..40].TrimEnd() : clean;
+    }
+
+    // `name`, or "name 2", "name 3"… when another account (not `self`) has it.
+    private static string FreeName(SqliteConnection connection, string name, long? self)
+    {
+        for (var number = 1; ; number++)
+        {
+            var candidate = number == 1 ? name : $"{name} {number}";
+            using var taken = connection.CreateCommand();
+            taken.CommandText = "SELECT COUNT(*) FROM Users WHERE UserName = $name AND Id IS NOT $self";
+            taken.Parameters.AddWithValue("$name", candidate);
+            taken.Parameters.AddWithValue("$self", (object?)self ?? DBNull.Value);
+            if ((long)taken.ExecuteScalar()! == 0)
+            {
+                return candidate;
+            }
+        }
     }
 
     // Null when the name is taken.

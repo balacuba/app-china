@@ -352,6 +352,13 @@ public sealed partial class Form1
             Activate();
             _updateSyncCard?.Invoke();
             await RunSyncAsync(fromButton: true);
+
+            // The learner's own Gemini key, made in their Google account, so
+            // Dịch đoạn văn is ready without typing a key in.
+            if (!GeminiAi.HasOwnKey && await GeminiAi.FetchKeyAsync(_syncClosing.Token) is null && !IsDisposed)
+            {
+                ShowSyncStatus("✅ Đã đồng bộ và lấy API key Gemini tự động từ tài khoản Google của bạn.", SuccessColor);
+            }
         }
 
         var googleButton = CreateButton("G  Đăng nhập bằng Google", async (_, _) => await SignInWithGoogle(), secondary: true);

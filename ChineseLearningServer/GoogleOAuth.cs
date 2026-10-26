@@ -36,8 +36,8 @@ public interface IGoogleOAuth
 
 public sealed class GoogleOAuth(HttpClient http, string clientId, string clientSecret) : IGoogleOAuth
 {
-    // Who the learner is.
-    public const string SignInScopes = "openid email";
+    // Who the learner is, and their name on Google.
+    public const string SignInScopes = "openid email profile";
 
     // Plus Gemini (Google's documented scopes for the Gemini API with OAuth).
     public const string GeminiScopes =

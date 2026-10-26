@@ -3,8 +3,9 @@ using Google.Apis.Auth;
 namespace ChineseLearningServer;
 
 // Who a "Sign in with Google" credential belongs to: Google's id for the
-// account (stable even if the address changes) and its verified Gmail address.
-public sealed record GoogleIdentity(string Subject, string Email);
+// account (stable even if the address changes), its verified Gmail address,
+// and the name on the Google account (e.g. "Lại Hoài"), when Google gives one.
+public sealed record GoogleIdentity(string Subject, string Email, string? Name = null);
 
 public interface IGoogleTokenValidator
 {
@@ -26,7 +27,7 @@ public sealed class GoogleTokenValidator : IGoogleTokenValidator
                 credential,
                 new GoogleJsonWebSignature.ValidationSettings { Audience = [clientId] });
             return payload.EmailVerified && !string.IsNullOrEmpty(payload.Email)
-                ? new GoogleIdentity(payload.Subject, payload.Email.ToLowerInvariant())
+                ? new GoogleIdentity(payload.Subject, payload.Email.ToLowerInvariant(), payload.Name)
                 : null;
         }
         catch (InvalidJwtException)

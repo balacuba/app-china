@@ -54,6 +54,7 @@ public static class StudyServer
         if (googleClientId.Length > 0 && googleClientSecret.Length > 0)
         {
             builder.Services.AddHttpClient<IGoogleOAuth, GoogleOAuth>(http => new GoogleOAuth(http, googleClientId, googleClientSecret));
+            builder.Services.AddHttpClient<IGeminiKeyMaker, GoogleCloudKeys>(http => http.Timeout = TimeSpan.FromSeconds(30));
         }
         // The word list is copied next to the server when it is built (see the .csproj).
         var vocabularyPath = Path.GetFullPath(

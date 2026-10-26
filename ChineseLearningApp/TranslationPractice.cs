@@ -2,8 +2,9 @@ using System.Text.Json;
 
 namespace ChineseLearningApp;
 
-// Paragraph translation practice. Google Gemini (with the learner's own free API
-// key) writes a short Chinese paragraph at the chosen HSK level (using some of the
+// Paragraph translation practice. Google Gemini (with a free key made in the
+// learner's Google account when they sign in to sync with Google, see GeminiAi)
+// writes a short Chinese paragraph at the chosen HSK level (using some of the
 // words being studied when it can), the learner types a Vietnamese translation,
 // and Gemini marks it out of 10 with comments, corrections and a model translation.
 internal sealed class TranslationPractice : Panel
@@ -25,7 +26,6 @@ internal sealed class TranslationPractice : Panel
     private readonly Button[] _levelButtons;
     private readonly Button[] _lengthButtons;
     private readonly Button _newButton;
-    private readonly Button _keyButton;
     private readonly Button _gradeButton;
     private readonly Button _answerButton;
     private readonly Button _pinyinButton;
@@ -76,16 +76,6 @@ internal sealed class TranslationPractice : Panel
         choices.Controls.Add(Caption("Độ dài", 18));
         choices.Controls.AddRange(_lengthButtons);
         choices.Controls.Add(_newButton);
-        // A small round key button, always in view, opens the AI picker.
-        _keyButton = Form1.CreateButton("🔑", (_, _) => AskForKey(), secondary: true);
-        _keyButton.AutoSize = false;
-        _keyButton.Size = new Size(40, 40);
-        _keyButton.Padding = Padding.Empty;
-        _keyButton.Margin = new Padding(10, 0, 0, 0);
-        _keyButton.Font = new Font("Segoe UI Emoji", 12F);
-        ((Form1.RoundedButton)_keyButton).Radius = 20;
-        new ToolTip().SetToolTip(_keyButton, "Chọn AI và API key");
-        choices.Controls.Add(_keyButton);
 
         // The paragraph, on a soft blue card, with listen / pinyin buttons.
         _topic.AutoSize = true;
@@ -185,10 +175,14 @@ internal sealed class TranslationPractice : Panel
 
         ShowChoices();
         ShowPinyin();
-        SetBusy(false, TutorAi.HasKey ? string.Empty
-            : GeminiAi.ThroughServer ? "Dùng Gemini qua tài khoản Google đã đăng nhập đồng bộ (không cần API key)."
-            : "Cần API key Gemini miễn phí: bấm nút 🔑 để nhập, hoặc đăng nhập đồng bộ bằng Google.");
+        SetBusy(false, ReadyText());
     }
+
+    // Whether Gemini can be used, for the status line before anything is asked.
+    public static string ReadyText() =>
+        TutorAi.HasKey ? "✅ Gemini sẵn sàng (API key lấy tự động từ tài khoản Google của bạn)."
+        : GeminiAi.ThroughServer ? "✅ Dùng Gemini qua tài khoản Google đã đăng nhập đồng bộ; API key riêng được lấy tự động."
+        : "Đăng nhập đồng bộ bằng Google (Cài đặt → Đồng bộ với web) để dùng Dịch đoạn văn. Không cần nhập API key.";
 
     private static Label Caption(string text, int left = 0, int top = 9) => new()
     {
@@ -282,16 +276,6 @@ internal sealed class TranslationPractice : Panel
         Relayout();
     }
 
-    // Opens the Gemini key box; once a key is saved the hint about it goes away.
-    private void AskForKey()
-    {
-        using var dialog = new AiKeyDialog(TutorAi.Gemini);
-        if (dialog.ShowDialog(FindForm()) == DialogResult.OK)
-        {
-            _status.Text = TutorAi.HasKey ? "✅ Đã lưu API key. Bấm “Đoạn văn mới” để bắt đầu." : "Đã xóa API key.";
-        }
-    }
-
     private void SetBusy(bool busy, string status = "")
     {
         _newButton.Enabled = !busy;
@@ -344,10 +328,6 @@ internal sealed class TranslationPractice : Panel
         catch (AiException ex)
         {
             SetBusy(false, "⚠ " + ex.Message);
-            if (ex.NeedsKey)
-            {
-                AskForKey();
-            }
         }
         catch (OperationCanceledException)
         {
@@ -390,10 +370,6 @@ internal sealed class TranslationPractice : Panel
         catch (AiException ex)
         {
             SetBusy(false, "⚠ " + ex.Message);
-            if (ex.NeedsKey)
-            {
-                AskForKey();
-            }
         }
         catch (OperationCanceledException)
         {

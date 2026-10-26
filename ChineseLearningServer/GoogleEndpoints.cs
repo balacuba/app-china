@@ -34,6 +34,9 @@ public static class GoogleEndpoints
         public readonly ConcurrentDictionary<string, Pending> PendingSignIns = new();
         public readonly ConcurrentDictionary<string, Ticket> Tickets = new();
         public readonly ConcurrentDictionary<long, (string Token, DateTimeOffset Expires)> AccessTokens = new();
+
+        // One key made at a time per learner, so two pages asking at once make one project.
+        public readonly ConcurrentDictionary<long, SemaphoreSlim> KeyLocks = new();
     }
 
     public static void MapGoogle(this RouteGroupBuilder api, string clientId)
@@ -140,6 +143,50 @@ public static class GoogleEndpoints
                 ? Results.Ok(new { available = google is not null, connected = google is not null && db.LoadGeminiGrant(user.Id) is not null })
                 : Auth.Unauthorized());
 
+        // The learner's own Gemini API key, made in their Google account the first
+        // time (GeminiKeys.cs); the website and the app keep it like a key the
+        // learner typed in.
+        api.MapPost("/gemini/key", async (HttpContext context, Database db, [FromServices] IGoogleOAuth? google,
+            [FromServices] IGeminiKeyMaker? keys) =>
+        {
+            if (Auth.SignedInUser(context, db) is not { } user)
+            {
+                return Auth.Unauthorized();
+            }
+
+            if (google is null || keys is null)
+            {
+                return Auth.Problem("Máy chủ chưa bật Gemini qua tài khoản Google.", StatusCodes.Status404NotFound);
+            }
+
+            var access = await AccessToken(store, user.Id, db, google);
+            if (access is null)
+            {
+                return Auth.Problem("Tài khoản chưa cho phép dùng Gemini qua Google. Hãy đăng nhập lại bằng Google và đánh dấu quyền Gemini.",
+                    StatusCodes.Status412PreconditionFailed);
+            }
+
+            var gate = store.KeyLocks.GetOrAdd(user.Id, _ => new SemaphoreSlim(1, 1));
+            await gate.WaitAsync(context.RequestAborted);
+            try
+            {
+                return Results.Ok(new { key = await keys.GetOrCreateAsync(access, context.RequestAborted) });
+            }
+            catch (GeminiKeyException ex)
+            {
+                return Auth.Problem(ex.Message, StatusCodes.Status502BadGateway);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException ||
+                                       (ex is TaskCanceledException && !context.RequestAborted.IsCancellationRequested))
+            {
+                return Auth.Problem("Không kết nối được Google để tạo API key. Hãy thử lại.", StatusCodes.Status502BadGateway);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        });
+
         // A Gemini generateContent request, sent on with the learner's own Google
         // access; Google's answer (and status) comes back as it is.
         api.MapPost("/gemini/generate", async (HttpContext context, Database db, [FromServices] IGoogleOAuth? google, IHttpClientFactory clients) =>
@@ -162,7 +209,7 @@ public static class GoogleEndpoints
             var access = await AccessToken(store, user.Id, db, google);
             if (access is null)
             {
-                return Auth.Problem("Tài khoản chưa cho phép dùng Gemini qua Google. Hãy bấm nút 🔑 → “Cho phép Gemini qua Google” và đánh dấu quyền Gemini.",
+                return Auth.Problem("Tài khoản chưa cho phép dùng Gemini qua Google. Hãy đăng nhập lại bằng Google và đánh dấu quyền Gemini.",
                     StatusCodes.Status412PreconditionFailed);
             }
 

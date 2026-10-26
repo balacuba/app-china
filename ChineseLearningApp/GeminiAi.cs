@@ -6,14 +6,18 @@ using System.Text.RegularExpressions;
 
 namespace ChineseLearningApp;
 
-// Google Gemini through its REST API, with the learner's own free API key from
-// Google AI Studio. Every question asks for a JSON object back.
+// Google Gemini through its REST API. Every question asks for a JSON object back.
 //
-// Signed in to the study server with Google (Gemini allowed there), no key is
-// needed: questions go through the server, which asks Gemini with the learner's
-// own Google account. If the server cannot, the key is used.
+// Nothing to set up: signed in to the study server with Google (Gemini allowed
+// there), the server makes the learner's own free API key in their Google
+// account, which is kept here and used. Until then, or if that key fails,
+// questions go through the server, which asks Gemini with the learner's Google
+// account.
 internal static partial class GeminiAi
 {
+    private const string NeedsGoogle =
+        "Đăng nhập đồng bộ bằng Google (Cài đặt → Đồng bộ với web, đồng ý quyền Gemini) để dùng Dịch đoạn văn. Không cần nhập API key.";
+
     // The study server this PC syncs with (set by Form1).
     public static SyncService? StudyServer { get; set; }
 
@@ -32,33 +36,34 @@ internal static partial class GeminiAi
     private const string Endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent";
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(90) };
 
-    // What Gemini API keys look like: "AIza" and 35 more letters, digits, - or _.
-    [GeneratedRegex(@"^AIza[0-9A-Za-z_\-]{35}$")]
-    public static partial Regex KeyShape();
-
-    // Asks Gemini whether a key works (listing models costs nothing). Returns null
-    // when it does, or a message saying why not.
-    public static async Task<string?> CheckKeyAsync(string key, CancellationToken cancellation)
+    // The learner's own key, for the account this PC syncs with (kept as "account\nkey").
+    private static string OwnKey()
     {
-        try
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Get, "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1");
-            request.Headers.Add("x-goog-api-key", key);
-            using var response = await Http.SendAsync(request, cancellation);
-            if (response.IsSuccessStatusCode)
-            {
-                return null;
-            }
+        var stored = AiKeyStore.Gemini.Load().Split('\n', 2);
+        return stored.Length == 2 && StudyServer is { } server &&
+               string.Equals(stored[0], server.UserName, StringComparison.OrdinalIgnoreCase)
+            ? stored[1]
+            : string.Empty;
+    }
 
-            var body = await response.Content.ReadAsStringAsync(cancellation);
-            return body.Contains("API_KEY_INVALID", StringComparison.Ordinal)
-                ? "Key không hợp lệ. Hãy sao chép lại key từ Google AI Studio."
-                : $"Google từ chối key ({(int)response.StatusCode}). Hãy kiểm tra key hoặc thử lại.";
-        }
-        catch (Exception ex) when (ex is HttpRequestException || (ex is TaskCanceledException && !cancellation.IsCancellationRequested))
+    public static bool HasOwnKey => OwnKey().Length > 0;
+
+    // Gets the learner's own key from the study server (made in their Google
+    // account the first time). Null when it worked, otherwise why not.
+    public static async Task<string?> FetchKeyAsync(CancellationToken cancellation)
+    {
+        if (StudyServer is not { SignedIn: true } server)
         {
-            return "Không kết nối được Google để kiểm tra key. Kiểm tra mạng Internet.";
+            return "Chưa đăng nhập đồng bộ.";
         }
+
+        var (key, problem) = await server.GetGeminiKeyAsync(cancellation);
+        if (key is not null)
+        {
+            AiKeyStore.Gemini.Save($"{server.UserName}\n{key}");
+        }
+
+        return problem;
     }
 
     // Sends one question and returns the JSON object in the answer. `progress`
@@ -66,11 +71,18 @@ internal static partial class GeminiAi
     // asks to wait. Busy or briefly rate-limited replies are retried.
     public static async Task<JsonElement> AskJsonAsync(string system, string question, string working, IProgress<string> progress, CancellationToken cancellation)
     {
-        var key = AiKeyStore.Gemini.Load();
+        var key = OwnKey();
         var throughServer = ThroughServer;
-        if (!throughServer && key.Length == 0)
+        if (key.Length == 0 && throughServer)
         {
-            throw new AiException("Hãy nhập API key Gemini trước (nút 🔑), hoặc đăng nhập đồng bộ bằng Google.", needsKey: true);
+            progress.Report("⏳ Đang lấy API key Gemini từ tài khoản Google của bạn (lần đầu mất khoảng 1 phút)…");
+            await FetchKeyAsync(cancellation);
+            key = OwnKey();
+        }
+
+        if (key.Length == 0 && !throughServer)
+        {
+            throw new AiException(NeedsGoogle, needsKey: true);
         }
 
         Exception? last = null;
@@ -79,25 +91,20 @@ internal static partial class GeminiAi
             progress.Report(working);
             try
             {
-                return await AskOnceAsync(throughServer ? null : key, system, question, cancellation);
+                return await AskOnceAsync(key.Length > 0 ? key : null, system, question, cancellation);
+            }
+            catch (AiException refusedKey) when (refusedKey.NeedsKey && key.Length > 0 && throughServer)
+            {
+                // A key Google refuses (just made, or removed since): through the
+                // server this time, and a new key is fetched next time.
+                AiKeyStore.Gemini.Save(string.Empty);
+                key = string.Empty;
+                attempt--;
             }
             catch (ServerRefusedException refused)
             {
                 _serverRefused = true;
-                throughServer = false;
-                if (key.Length == 0)
-                {
-                    throw new AiException($"{refused.Message} Hoặc nhập API key Gemini (nút 🔑).", needsKey: true);
-                }
-
-                // Asked again with the key, without counting this try.
-                attempt--;
-            }
-            catch (HttpRequestException) when (throughServer && key.Length > 0)
-            {
-                // The study server is not running: the key works without it.
-                throughServer = false;
-                attempt--;
+                throw new AiException(refused.Message, needsKey: true);
             }
             catch (RetryLaterException wait)
             {
@@ -137,7 +144,7 @@ internal static partial class GeminiAi
             generationConfig = new { responseMimeType = "application/json", temperature = 0.7 }
         });
         using var response = key is null
-            ? await (StudyServer?.SendGeminiAsync(payload, cancellation) ?? Task.FromResult<HttpResponseMessage?>(null)) ?? throw new ServerRefusedException("Chưa đăng nhập đồng bộ bằng Google.")
+            ? await (StudyServer?.SendGeminiAsync(payload, cancellation) ?? Task.FromResult<HttpResponseMessage?>(null)) ?? throw new ServerRefusedException(NeedsGoogle)
             : await SendWithKey(key, payload, cancellation);
         if (key is null && response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden
                 or HttpStatusCode.NotFound or HttpStatusCode.PreconditionFailed)
@@ -209,7 +216,7 @@ internal static partial class GeminiAi
 
         if (body.Contains("API_KEY_INVALID", StringComparison.Ordinal) || status is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
         {
-            return new AiException("API key Gemini không hợp lệ hoặc không có quyền. Hãy kiểm tra lại key (nút 🔑).", needsKey: true);
+            return new AiException("API key Gemini tự tạo không dùng được. Hãy thử lại sau ít phút.", needsKey: true);
         }
 
         if (status == HttpStatusCode.TooManyRequests || reason == "RESOURCE_EXHAUSTED")

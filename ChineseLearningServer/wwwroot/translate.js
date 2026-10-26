@@ -1,12 +1,12 @@
 // Paragraph translation practice (TranslationPractice.cs + GeminiAi.cs).
-// Google Gemini, with the learner's own free API key, writes a short Chinese
-// paragraph at the chosen HSK level, the learner types a Vietnamese translation,
-// and Gemini marks it out of 10 with comments, corrections and a model
-// translation. The key stays in this browser: it is sent only to Google, never
-// to our server.
+// Google Gemini writes a short Chinese paragraph at the chosen HSK level, the
+// learner types a Vietnamese translation, and Gemini marks it out of 10 with
+// comments, corrections and a model translation.
 //
-// With Gemini allowed through Google (🔑 → “Cho phép Gemini qua Google”), no
-// key is needed: the server asks Gemini with the learner's own Google access
+// Nothing to set up: signed in with Google (Gemini allowed), the server makes
+// the learner's own free Gemini API key in their Google account
+// (/api/gemini/key), kept in this browser and sent only to Google. Until then,
+// or if that key fails, the server asks Gemini with the learner's Google access
 // (/api/gemini/generate).
 
 import { GOOGLE_LOGO } from './app.js';
@@ -14,8 +14,9 @@ import { GOOGLE_LOGO } from './app.js';
 // Always the newest Flash-Lite model on the free tier: it answers in a second or two.
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent';
 const PROXY = '/api/gemini/generate';
-const KEY_STORE = 'cl.geminiKey';
-const KEY_SHAPE = /^AIza[0-9A-Za-z_-]{35}$/;
+// {user, key}: the key made for the account signed in here.
+const KEY_STORE = 'cl.geminiAutoKey';
+const NEEDS_GOOGLE = 'Đăng nhập bằng Google (đồng ý quyền Gemini) để dùng Dịch đoạn văn. Không cần nhập API key.';
 
 const TEACHER_ROLE =
   'Bạn là giáo viên tiếng Trung giỏi, dạy người Việt Nam. Bạn luôn chỉ trả lời bằng một đối tượng JSON hợp lệ, không thêm chữ nào khác.';
@@ -49,23 +50,44 @@ class RetryLater extends Error {
   }
 }
 
-// The key in whatever was pasted: a usual "AIza…" key is picked out of text
-// around it (or a key pasted twice); anything else is taken as it is, minus
-// spaces and quotes, and Google says whether it works.
-function keyFromPaste(text) {
-  const usual = new RegExp(KEY_SHAPE.source.replace(/^\^|\$$/g, '') + '(?![0-9A-Za-z_-])').exec(text);
-  return usual ? usual[0] : text.replace(/[\s"'`]/g, '');
-}
+const siteToken = () => localStorage.getItem('cl.token') ?? '';
+const siteUser = () => (localStorage.getItem('cl.user') ?? '').toLowerCase();
+
+// Keys typed in by hand are no longer used.
+localStorage.removeItem('cl.geminiKey');
 
 function loadKey() {
   try {
-    return localStorage.getItem(KEY_STORE) ?? '';
+    const stored = JSON.parse(localStorage.getItem(KEY_STORE) ?? 'null');
+    return stored?.user === siteUser() && typeof stored.key === 'string' ? stored.key : '';
   } catch {
     return '';
   }
 }
 
-const siteToken = () => localStorage.getItem('cl.token') ?? '';
+const forgetKey = () => localStorage.removeItem(KEY_STORE);
+
+// The learner's own key, made in their Google account the first time (which
+// can take a minute). Throws an AiError saying why when there is none.
+let keyRequest = null;
+function fetchKey() {
+  keyRequest ??= (async () => {
+    try {
+      const response = await fetch('/api/gemini/key', { method: 'POST', headers: { Authorization: `Bearer ${siteToken()}` } });
+      const reply = await response.json().catch(() => ({}));
+      if (!response.ok || typeof reply.key !== 'string') {
+        throw new AiError(reply.error ?? `Không lấy được API key Gemini (${response.status}).`, response.status !== 502);
+      }
+      localStorage.setItem(KEY_STORE, JSON.stringify({ user: siteUser(), key: reply.key }));
+      return reply.key;
+    } catch (error) {
+      throw error instanceof AiError ? error : new AiError('Không kết nối được máy chủ để lấy API key Gemini.');
+    } finally {
+      keyRequest = null;
+    }
+  })();
+  return keyRequest;
+}
 
 // Whether Gemini can be used through the learner's Google account: null until
 // the server has said.
@@ -85,21 +107,6 @@ async function checkGoogle() {
   return throughGoogle;
 }
 
-// Asks Gemini whether a key works (listing models costs nothing). Returns null
-// when it does, or a message saying why not.
-async function checkKey(key) {
-  try {
-    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', { headers: { 'x-goog-api-key': key } });
-    if (response.ok) return null;
-    const body = await response.text();
-    return body.includes('API_KEY_INVALID')
-      ? 'Key không hợp lệ. Hãy sao chép lại key từ Google AI Studio.'
-      : `Google từ chối key (${response.status}). Hãy kiểm tra key hoặc thử lại.`;
-  } catch {
-    return 'Không kết nối được Google để kiểm tra key. Kiểm tra mạng Internet.';
-  }
-}
-
 // Turns an error reply into something the learner can act on.
 function failure(status, body, viaGoogle) {
   let reason = '';
@@ -111,14 +118,14 @@ function failure(status, body, viaGoogle) {
   } catch { /* not JSON */ }
   if (viaGoogle && (status === 401 || status === 403 || status === 404 || status === 412)) {
     // Signed out, Gemini not allowed (any more), or not switched on for the
-    // site's Google project: a key still works meanwhile.
+    // site's Google project.
     throughGoogle = false;
     return new AiError(status === 403
-      ? `Google chưa cho tài khoản này dùng Gemini qua trang học (${said || reason}). Tạm thời hãy dùng API key (nút 🔑).`
-      : `${said || 'Không dùng được Gemini qua tài khoản Google. Hãy bấm nút 🔑 → “Cho phép Gemini qua Google”.'} Hoặc dùng API key (nút 🔑).`, true);
+      ? `Google chưa cho tài khoản này dùng Gemini qua trang học (${said || reason}).`
+      : said || NEEDS_GOOGLE, true);
   }
   if (body.includes('API_KEY_INVALID') || status === 401 || status === 403) {
-    return new AiError('API key Gemini không hợp lệ hoặc không có quyền. Hãy kiểm tra lại key (nút 🔑).', true);
+    return new AiError('API key Gemini tự tạo không dùng được. Hãy thử lại sau ít phút.', true);
   }
   if (status === 429 || reason === 'RESOURCE_EXHAUSTED') {
     // A short wait (e.g. "retryDelay": "21s") is waited out; the daily limit is not.
@@ -164,17 +171,30 @@ async function askOnce(key, system, question, signal) {
 // receives `working` while Gemini answers, and a countdown if the free tier asks
 // to wait. Busy or briefly rate-limited replies are retried.
 async function askJson(system, question, working, progress, signal) {
-  // The Google account first (nothing to set up); otherwise the key.
-  const key = (throughGoogle ?? await checkGoogle()) ? null : loadKey();
-  if (key === '') throw new AiError('Hãy nhập API key Gemini trước (nút 🔑), hoặc đăng nhập bằng Google.', true);
+  // The learner's own key (made the first time); else through their Google account.
+  const connected = throughGoogle ?? await checkGoogle();
+  let key = loadKey();
+  if (!key && connected) {
+    progress('⏳ Đang lấy API key Gemini từ tài khoản Google của bạn (lần đầu mất khoảng 1 phút)…');
+    key = await fetchKey().catch(() => '');
+  }
+  if (!key && !connected) throw new AiError(NEEDS_GOOGLE, true);
   let last = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     progress(working);
     try {
-      return await askOnce(key, system, question, signal);
+      return await askOnce(key || null, system, question, signal);
     } catch (error) {
       if (signal.aborted) throw error;
       last = error;
+      if (key && error instanceof AiError && error.needsKey && throughGoogle !== false) {
+        // A key Google refuses (just made, or removed since): through the
+        // Google account this time, and a new key is fetched next time.
+        forgetKey();
+        key = '';
+        attempt--;
+        continue;
+      }
       if (error instanceof RetryLater) {
         for (let seconds = error.seconds; seconds > 0; seconds--) {
           progress(`⏳ Gemini miễn phí đang giới hạn lượt hỏi, chờ ${seconds} giây…`);
@@ -218,7 +238,7 @@ export function showTranslate(view, app) {
   view.innerHTML = `
     <div class="toolbar" style="justify-content:space-between">
       <h1>Dịch đoạn văn</h1>
-      <button class="ghost" id="key" type="button" title="API key Gemini">🔑 API key</button>
+      <a class="google-link" id="allow-google" href="/api/oauth/google/start?returnTo=%23%2Ftranslate" hidden>${GOOGLE_LOGO}<span>Đăng nhập Google để dùng Gemini</span></a>
     </div>
     <p class="lead">Gemini viết một đoạn văn tiếng Trung theo trình độ của bạn; bạn dịch sang tiếng Việt rồi Gemini chấm điểm.</p>
     <section class="card translate">
@@ -246,29 +266,10 @@ export function showTranslate(view, app) {
         <span class="muted" id="status" role="status"></span>
       </div>
       <div class="result" id="result"></div>
-    </section>
-    <dialog id="key-dialog">
-      <div class="head"><h2>API key Gemini</h2><button class="ghost" id="key-close" type="button">Đóng</button></div>
-      <form class="body key-form" id="key-form" novalidate>
-        <p>Trang này dùng Google Gemini miễn phí bằng API key của chính bạn. Lấy key tại
-          <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Google AI Studio</a> (đăng nhập Google → “Create API key”), rồi dán vào đây.</p>
-        <p class="muted">Key chỉ được lưu trong trình duyệt này và chỉ gửi tới Google, không gửi lên máy chủ của trang học.</p>
-        <div id="key-google" hidden>
-          <p class="muted">Hoặc không cần key: cho trang học dùng Gemini bằng tài khoản Google của bạn.</p>
-          <a class="google-link" href="/api/oauth/google/start?gemini=1&returnTo=%23%2Ftranslate">${GOOGLE_LOGO}<span>Cho phép Gemini qua Google</span></a>
-        </div>
-        <input id="key-input" type="password" autocomplete="off" spellcheck="false" placeholder="AIza…">
-        <p class="error" id="key-error"></p>
-        <div class="controls" style="justify-content:flex-start">
-          <button class="primary" type="submit">Kiểm tra và lưu</button>
-          <button class="ghost" id="key-delete" type="button">Xóa key</button>
-        </div>
-      </form>
-    </dialog>`;
+    </section>`;
 
   const $ = selector => view.querySelector(selector);
   const translation = $('#translation');
-  const keyDialog = $('#key-dialog');
 
   // A request can finish after the learner has gone to another page: its answer
   // is kept in `page` and shown on the next visit.
@@ -301,19 +302,17 @@ export function showTranslate(view, app) {
     $('#status').textContent = page.status;
   }
 
-  function openKey() {
-    $('#key-input').value = loadKey();
-    $('#key-error').textContent = '';
-    $('#key-google').hidden = !googleAvailable || throughGoogle === true;
-    keyDialog.showModal();
-  }
+  // The Google sign-in link, when Gemini cannot be used yet.
+  const showGoogleLink = () => {
+    if (onScreen()) $('#allow-google').hidden = !googleAvailable || throughGoogle === true || loadKey() !== '';
+  };
 
   function fail(error) {
     page.busy = null;
     if (error?.name === 'AbortError' && !(error instanceof AiError)) return;
     setStatus('⚠ ' + (error instanceof AiError ? error.message : 'AI trả lời không đúng dạng. Hãy thử lại.'));
     render();
-    if (error instanceof AiError && error.needsKey && onScreen()) openKey();
+    showGoogleLink();
   }
 
   function begin(message) {
@@ -453,40 +452,27 @@ export function showTranslate(view, app) {
   translation.value = page.translation;
   translation.addEventListener('input', () => { page.translation = translation.value; });
 
-  $('#key').addEventListener('click', openKey);
-  $('#key-close').addEventListener('click', () => keyDialog.close());
-  $('#key-delete').addEventListener('click', () => {
-    localStorage.removeItem(KEY_STORE);
-    keyDialog.close();
-    setStatus('Đã xóa API key.');
-  });
-  $('#key-form').addEventListener('submit', async event => {
-    event.preventDefault();
-    const key = keyFromPaste($('#key-input').value);
-    const error = $('#key-error');
-    if (key.length < 20) {
-      error.textContent = 'Chưa có key. Hãy dán API key Gemini sao chép từ Google AI Studio.';
-      return;
+  // On opening the page: the learner's key is fetched (made the first time) as
+  // soon as their Google account allows Gemini, without waiting for a question.
+  const quiet = () => page.busy === null && (!page.status || page.status.startsWith('⏳ Đang lấy') ||
+    page.status === NEEDS_GOOGLE);
+  checkGoogle().then(async connected => {
+    showGoogleLink();
+    if (!quiet()) return;
+    if (loadKey()) {
+      setStatus('✅ Gemini sẵn sàng (API key lấy tự động từ tài khoản Google của bạn).');
+    } else if (connected) {
+      setStatus('⏳ Đang lấy API key Gemini từ tài khoản Google của bạn (lần đầu mất khoảng 1 phút)…');
+      const problem = await fetchKey().then(() => '', error => error.message);
+      if (!quiet()) return;
+      // Without a key, Gemini still works through the Google account.
+      setStatus(problem
+        ? `✅ Dùng Gemini qua tài khoản Google của bạn. (Chưa tạo được API key riêng: ${problem})`
+        : '✅ Gemini sẵn sàng (API key lấy tự động từ tài khoản Google của bạn).');
+    } else {
+      setStatus(NEEDS_GOOGLE);
     }
-    $('#key-input').value = key;
-    const submit = event.submitter;
-    submit.disabled = true;
-    error.textContent = 'Đang kiểm tra key với Google…';
-    const problem = await checkKey(key);
-    submit.disabled = false;
-    if (problem) {
-      error.textContent = problem;
-      return;
-    }
-    localStorage.setItem(KEY_STORE, key);
-    keyDialog.close();
-    setStatus('✅ Đã lưu API key. Bấm “Đoạn văn mới” để bắt đầu.');
-  });
-
-  const NEEDS_KEY = 'Cần API key Gemini miễn phí, hoặc cho phép Gemini qua tài khoản Google: bấm nút 🔑.';
-  checkGoogle().then(connected => {
-    if (page.busy !== null || (page.status && page.status !== NEEDS_KEY)) return;
-    setStatus(connected ? '✅ Dùng Gemini qua tài khoản Google của bạn, không cần API key.' : loadKey() ? '' : NEEDS_KEY);
+    showGoogleLink();
   });
   render();
 

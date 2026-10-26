@@ -16,6 +16,7 @@ public sealed class GeminiThroughGoogleTests : IDisposable
     private readonly string _databasePath = Path.Combine(Path.GetTempPath(), $"chinese-gemini-{Guid.NewGuid():N}.db");
     private readonly FakeOAuth _google = new();
     private readonly FakeGemini _gemini = new();
+    private readonly FakeKeys _keys = new();
     private readonly WebApplicationFactory<Program> _factory;
 
     public GeminiThroughGoogleTests()
@@ -29,6 +30,7 @@ public sealed class GeminiThroughGoogleTests : IDisposable
             {
                 services.AddSingleton<IGoogleTokenValidator>(new FakeIdTokens());
                 services.AddSingleton<IGoogleOAuth>(_google);
+                services.AddSingleton<IGeminiKeyMaker>(_keys);
                 services.AddHttpClient("gemini").ConfigurePrimaryHttpMessageHandler(() => _gemini);
             });
         });
@@ -86,7 +88,7 @@ public sealed class GeminiThroughGoogleTests : IDisposable
         var again = await browser.PostAsJsonAsync("/api/login/ticket", new { ticket = landing.OriginalString.Split("ticket=")[1] });
 
         Assert.StartsWith("/#/google-done?ticket=", landing.OriginalString);
-        Assert.Equal("lai.hoai@gmail.com", signedIn.UserName);
+        Assert.Equal("Lại Hoài", signedIn.UserName);
         Assert.Equal("#/translate", signedIn.ReturnTo);
         Assert.Equal(HttpStatusCode.Unauthorized, again.StatusCode);
     }
@@ -177,6 +179,48 @@ public sealed class GeminiThroughGoogleTests : IDisposable
     }
 
     [Fact]
+    public async Task SignedInWithGoogleTheLearnerGetsTheirOwnGeminiKey()
+    {
+        var browser = Browser();
+        var signedIn = await Redeem(browser, await SignInAtGoogle(browser));
+        browser.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", signedIn.Token);
+
+        var reply = await browser.PostAsync("/api/gemini/key", null);
+        var key = await reply.Content.ReadFromJsonAsync<Dictionary<string, string>>();
+
+        Assert.Equal(HttpStatusCode.OK, reply.StatusCode);
+        Assert.Equal(FakeKeys.Key, key!["key"]);
+        Assert.Equal("access-1", _keys.LastAccessToken);
+    }
+
+    [Fact]
+    public async Task NoKeyIsMadeWithoutGeminiAllowed()
+    {
+        var browser = Browser();
+        var signedIn = await Redeem(browser, await SignInAtGoogle(browser, code: "no-gemini"));
+        browser.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", signedIn.Token);
+
+        var reply = await browser.PostAsync("/api/gemini/key", null);
+
+        Assert.Equal(HttpStatusCode.PreconditionFailed, reply.StatusCode);
+        Assert.Null(_keys.LastAccessToken);
+    }
+
+    [Fact]
+    public async Task WhyGoogleWouldNotMakeTheKeyIsPassedOn()
+    {
+        var browser = Browser();
+        var signedIn = await Redeem(browser, await SignInAtGoogle(browser));
+        browser.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", signedIn.Token);
+        _keys.Refuse = "Tài khoản Google này chưa đồng ý điều khoản Google Cloud.";
+
+        var reply = await browser.PostAsync("/api/gemini/key", null);
+
+        Assert.Equal(HttpStatusCode.BadGateway, reply.StatusCode);
+        Assert.Contains("điều khoản", await reply.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
     public async Task GeminiNeedsASignIn()
     {
         var answer = await _factory.CreateClient().PostAsync("/api/gemini/generate",
@@ -189,7 +233,7 @@ public sealed class GeminiThroughGoogleTests : IDisposable
     {
         public Task<GoogleIdentity?> ValidateAsync(string credential, string clientId) =>
             Task.FromResult(credential == "id-token" && clientId == ClientId
-                ? new GoogleIdentity("google-sub-123", "lai.hoai@gmail.com")
+                ? new GoogleIdentity("google-sub-123", "lai.hoai@gmail.com", "Lại Hoài")
                 : null);
     }
 
@@ -229,6 +273,21 @@ public sealed class GeminiThroughGoogleTests : IDisposable
                 Content = new StringContent("""{"candidates":[{"content":{"parts":[{"text":"xin chào"}]}}]}""",
                     System.Text.Encoding.UTF8, "application/json")
             };
+        }
+    }
+
+    private sealed class FakeKeys : IGeminiKeyMaker
+    {
+        public const string Key = "AIzaSyTEST-made-for-the-learner-000000";
+
+        public string? LastAccessToken { get; private set; }
+
+        public string? Refuse { get; set; }
+
+        public Task<string> GetOrCreateAsync(string accessToken, CancellationToken cancellation)
+        {
+            LastAccessToken = accessToken;
+            return Refuse is null ? Task.FromResult(Key) : throw new GeminiKeyException(Refuse);
         }
     }
 

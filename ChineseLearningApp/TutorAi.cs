@@ -1,44 +1,23 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 
 namespace ChineseLearningApp;
 
 // A problem talking to the AI, with a message fit to show the learner.
-// `NeedsKey` means the learner has to enter or replace their API key.
+// `NeedsKey` means Gemini cannot be used until the learner signs in with Google.
 internal sealed class AiException(string message, bool needsKey = false, Exception? inner = null) : Exception(message, inner)
 {
     public bool NeedsKey { get; } = needsKey;
 }
 
-// One AI service the translation page can use, with what the key box needs to
-// help the learner get and check a key for it.
-internal sealed record AiProvider(
-    string Name,
-    string KeyPage,
-    string Steps,
-    Func<Regex> KeyShape,
-    Func<string, CancellationToken, Task<string?>> CheckKeyAsync,
-    AiKeyStore Keys);
-
-// The AI behind the paragraph translation page: Google Gemini, which has a free
-// tier, with the learner's own key.
+// The AI behind the paragraph translation page: Google Gemini, on its free
+// tier, with a key made automatically in the learner's Google account.
 internal static class TutorAi
 {
-    public static readonly AiProvider Gemini = new(
-        "Gemini (Google)",
-        "https://aistudio.google.com/app/apikey",
-        "1. Bấm nút dưới đây để mở Google AI Studio, đăng nhập tài khoản Google của bạn.\n" +
-        "2. Bấm “Create API key” (miễn phí), rồi bấm nút Copy bên cạnh key.\n" +
-        "3. Xong! App tự nhận key vừa copy, kiểm tra và lưu lại.",
-        GeminiAi.KeyShape,
-        GeminiAi.CheckKeyAsync,
-        AiKeyStore.Gemini);
+    public static bool HasKey => GeminiAi.HasOwnKey;
 
-    public static bool HasKey => AiKeyStore.Gemini.HasKey;
-
-    // A key, or the study server's Google sign-in instead of one.
+    // The learner's own key, or the study server's Google sign-in instead of one.
     public static bool CanAsk => HasKey || GeminiAi.ThroughServer;
 
     // Asks Gemini for a JSON object; the prompt describes the fields.
@@ -51,11 +30,14 @@ internal static class TutorAi
             : string.Empty;
 }
 
-// An AI API key, kept in the app's data folder encrypted with Windows (DPAPI), so
-// it can only be read back by the same Windows user.
+// A secret (a sign-in token, an API key), kept in the app's data folder
+// encrypted with Windows (DPAPI), so it can only be read back by the same
+// Windows user.
 internal sealed class AiKeyStore(string fileName)
 {
-    public static readonly AiKeyStore Gemini = new("gemini-key.bin");
+    // The Gemini key made in the learner's Google account, as "account\nkey".
+    // (Keys typed in by hand were kept in gemini-key.bin, no longer used.)
+    public static readonly AiKeyStore Gemini = new("gemini-auto-key.bin");
 
     private readonly string _path = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

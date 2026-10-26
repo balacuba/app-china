@@ -54,7 +54,7 @@ public sealed class GoogleSignInTests : IDisposable
         var first = await (await SignIn("hoai")).Content.ReadFromJsonAsync<SignedInReply>();
         var again = await (await SignIn("hoai")).Content.ReadFromJsonAsync<SignedInReply>();
 
-        Assert.Equal("lai.hoai@gmail.com", first!.UserName);
+        Assert.Equal("Lại Hoài", first!.UserName);
         Assert.Equal(first.UserName, again!.UserName);
         Assert.NotEqual(first.Token, again.Token);
     }
@@ -72,7 +72,7 @@ public sealed class GoogleSignInTests : IDisposable
     {
         await SignIn("hoai");
 
-        var login = await _factory.CreateClient().PostAsJsonAsync("/api/login", new { userName = "lai.hoai@gmail.com", password = "anything" });
+        var login = await _factory.CreateClient().PostAsJsonAsync("/api/login", new { userName = "Lại Hoài", password = "anything" });
 
         Assert.Equal(HttpStatusCode.Unauthorized, login.StatusCode);
     }
@@ -110,7 +110,7 @@ public sealed class GoogleSignInTests : IDisposable
     {
         public Task<GoogleIdentity?> ValidateAsync(string credential, string clientId) =>
             Task.FromResult(credential == "hoai" && clientId == ClientId
-                ? new GoogleIdentity("google-sub-123", "lai.hoai@gmail.com")
+                ? new GoogleIdentity("google-sub-123", "lai.hoai@gmail.com", "Lại Hoài")
                 : null);
     }
 

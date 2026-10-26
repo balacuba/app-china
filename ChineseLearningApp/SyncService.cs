@@ -23,6 +23,8 @@ internal sealed class SyncService
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(15) };
     // Answers from Gemini take longer than a sync.
     private static readonly HttpClient GeminiHttp = new() { Timeout = TimeSpan.FromSeconds(90) };
+    // Making a Gemini key in a Google account the first time can take a couple of minutes.
+    private static readonly HttpClient KeyHttp = new() { Timeout = TimeSpan.FromMinutes(3) };
     private static readonly string Folder = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ChineseLearningApp");
 
@@ -384,6 +386,39 @@ internal sealed class SyncService
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return await GeminiHttp.SendAsync(request, cancellation).ConfigureAwait(false);
+    }
+
+    // The learner's own Gemini API key, which the study server makes in their
+    // Google account the first time (signed in with Google, Gemini allowed).
+    // Either the key or what to tell the learner.
+    public async Task<(string? Key, string? Problem)> GetGeminiKeyAsync(CancellationToken cancellation)
+    {
+        var token = _token.Load();
+        if (!SignedIn || token.Length == 0)
+        {
+            return (null, "Chưa đăng nhập đồng bộ.");
+        }
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{ServerUrl}/api/gemini/key");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            using var response = await KeyHttp.SendAsync(request, cancellation).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return (null, await ErrorText(response, cancellation).ConfigureAwait(false));
+            }
+
+            var reply = await response.Content.ReadFromJsonAsync<JsonElement>(Json, cancellation).ConfigureAwait(false);
+            return reply.ValueKind == JsonValueKind.Object && reply.TryGetProperty("key", out var key) && key.GetString() is { Length: > 0 } text
+                ? (text, null)
+                : (null, "Máy chủ không trả về API key Gemini.");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException ||
+                                   (ex is TaskCanceledException && !cancellation.IsCancellationRequested))
+        {
+            return (null, $"Không kết nối được máy chủ {ServerUrl}.");
+        }
     }
 
     public static async Task<string> ErrorText(HttpResponseMessage response, CancellationToken cancellation)
