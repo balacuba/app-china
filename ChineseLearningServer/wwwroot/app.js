@@ -201,6 +201,21 @@ function googleProblem() {
   }[why] ?? '';
 }
 
+// Google signs in only on http://localhost or an https:// address with a
+// domain name; opened by IP (http://192.168.…) it refuses (origin_mismatch).
+function googleCanSignInHere() {
+  const byIp = /^[\d.]+$|:/.test(location.hostname);
+  return location.hostname === 'localhost' || (location.protocol === 'https:' && !byIp);
+}
+
+// Under the Google button: the exact address Google Cloud must list, since
+// Google answers "origin_mismatch" for any page address it was not given.
+function googleOriginHint(redirect) {
+  return `<p class="google-note">Google báo lỗi <b>origin_mismatch</b>? Trong Google Cloud → Credentials → client OAuth, thêm
+    <b>${escape(location.origin)}</b> vào Authorized JavaScript origins${redirect
+      ? ` và <b>${escape(location.origin)}/api/oauth/google/callback</b> vào Authorized redirect URIs` : ''}, rồi chờ vài phút.</p>`;
+}
+
 async function showGoogleButton(showError) {
   try {
     siteConfig ??= await fetch('/api/config').then(response => response.json());
@@ -210,10 +225,7 @@ async function showGoogleButton(showError) {
   const clientId = siteConfig?.googleClientId;
   const area = view.querySelector('#google-area');
   if (!clientId || !area) return;
-  // Google signs in only on http://localhost or an https:// address with a
-  // domain name; opened by IP (http://192.168.…) it refuses (origin_mismatch).
-  const byIp = /^[\d.]+$|:/.test(location.hostname);
-  if (location.hostname !== 'localhost' && (location.protocol !== 'https:' || byIp)) {
+  if (!googleCanSignInHere()) {
     view.querySelector('#google-button').innerHTML =
       `<p class="google-note">Google chỉ cho đăng nhập khi trang được mở bằng <b>http://localhost:${escape(location.port || '80')}</b>
         trên chính máy chạy app, hoặc qua địa chỉ <b>https://</b> có tên miền, không cho qua địa chỉ IP như
@@ -227,6 +239,7 @@ async function showGoogleButton(showError) {
     const returnTo = pendingDesktopLogin() ? location.hash : '#/';
     view.querySelector('#google-button').innerHTML =
       `<a class="google-link" href="/api/oauth/google/start?returnTo=${encodeURIComponent(returnTo)}">${GOOGLE_LOGO}<span>Đăng nhập bằng Google</span></a>`;
+    view.querySelector('#google-button').insertAdjacentHTML('afterend', googleOriginHint(true));
     area.hidden = false;
     return;
   }
@@ -270,6 +283,7 @@ async function showGoogleButton(showError) {
   google.accounts.id.renderButton(view.querySelector('#google-button'), {
     theme: 'outline', size: 'large', shape: 'pill', text: 'signin_with', locale: 'vi', width: 300
   });
+  view.querySelector('#google-button').insertAdjacentHTML('afterend', googleOriginHint(false));
   area.hidden = false;
 }
 
@@ -301,9 +315,12 @@ function showDesktopLogin(request) {
       <p class="error" id="desktop-error"></p>
       <div class="controls">
         <button class="primary" id="allow" type="button">Cho phép</button>
+        <button class="ghost" id="other-account" type="button">Dùng tài khoản khác</button>
         <a class="button ghost" href="#/">Không, về trang chủ</a>
       </div>
     </section>`;
+  // Signs out here and back in with another account, still for the app.
+  view.querySelector('#other-account').addEventListener('click', () => switchAccount());
   view.querySelector('#allow').addEventListener('click', async event => {
     event.target.disabled = true;
     try {
@@ -352,6 +369,28 @@ function signOut(message = '') {
   state.sync = null;
   localStorage.removeItem('cl.token');
   showSignIn(message);
+}
+
+// Another Google account: the progress so far is synced, this one signs out,
+// and Google's own page asks which account (or, without it, the sign-in page
+// shows the Google button again without picking the last account by itself).
+// A desktop app waiting to sign in (#/desktop-login…) keeps waiting.
+async function switchAccount() {
+  const button = document.getElementById('switch-account');
+  button.disabled = true;
+  const returnTo = pendingDesktopLogin() ? location.hash : '#/';
+  try {
+    await state.sync?.sync();
+  } catch { /* kept in this browser; synced next time */ }
+  try {
+    siteConfig ??= await fetch('/api/config').then(response => response.json());
+  } catch { /* the sign-in page still works */ }
+  signOut();
+  button.disabled = false;
+  globalThis.google?.accounts?.id?.disableAutoSelect();
+  if (siteConfig?.googleRedirectLogin && googleCanSignInHere()) {
+    location.href = `/api/oauth/google/start?returnTo=${encodeURIComponent(returnTo)}`;
+  }
 }
 
 // ---------- sync ----------
@@ -893,6 +932,7 @@ async function route() {
 addEventListener('hashchange', route);
 document.getElementById('sync-button').addEventListener('click', () => state.sync?.sync());
 document.getElementById('logout').addEventListener('click', () => signOut());
+document.getElementById('switch-account').addEventListener('click', switchAccount);
 addEventListener('online', () => state.sync?.sync());
 addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') state.sync?.sync();

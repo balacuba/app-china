@@ -340,7 +340,7 @@ public sealed partial class Form1
         async Task SignInWithGoogle()
         {
             buttons.Enabled = false;
-            ShowSyncStatus("⏳ Đã mở trình duyệt: đăng nhập bằng Google rồi bấm “Cho phép”…", MutedTextColor);
+            ShowSyncStatus("⏳ Đã mở trình duyệt: đăng nhập bằng Google rồi bấm “Cho phép” (muốn tài khoản khác thì bấm “Dùng tài khoản khác”)…", MutedTextColor);
             var problem = await _sync.SignInThroughBrowserAsync(server.Text, _syncClosing.Token);
             buttons.Enabled = true;
             if (problem is not null)
@@ -371,7 +371,18 @@ public sealed partial class Form1
             _updateSyncCard?.Invoke();
             ShowSyncStatus("Đã đăng xuất. Tiến độ vẫn được lưu trên máy này.", MutedTextColor);
         }, secondary: true);
-        buttons.Controls.AddRange([googleButton, signInButton, registerButton, syncButton, signOutButton]);
+        // Another Google account: syncs what this one learned, signs out, and
+        // signs in again through the browser (where "Dùng tài khoản khác" picks it).
+        var switchButton = CreateButton("G  Đổi tài khoản Google", async (_, _) =>
+        {
+            buttons.Enabled = false;
+            await RunSyncAsync(fromButton: true);
+            _sync.SignOut();
+            _updateSyncCard?.Invoke();
+            await SignInWithGoogle();
+        }, secondary: true);
+
+        buttons.Controls.AddRange([googleButton, signInButton, registerButton, syncButton, switchButton, signOutButton]);
 
         _updateSyncCard = () =>
         {
@@ -385,6 +396,7 @@ public sealed partial class Form1
             signedInLabel.Visible = signedIn;
             syncButton.Visible = signedIn;
             signOutButton.Visible = signedIn;
+            switchButton.Visible = signedIn;
             signedInLabel.Text = $"Đã đăng nhập: {_sync.UserName}  ·  {_sync.ServerUrl}";
         };
         _updateSyncCard();
