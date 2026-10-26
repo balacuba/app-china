@@ -28,4 +28,8 @@
     <Content Include="..\ChineseLearningServer\wwwroot\**" LinkBase="wwwroot" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="LettuceEncrypt" Version="1.3.3" />
+  </ItemGroup>
+
 </Project>

@@ -4,7 +4,10 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using ChineseLearningServer;
+using LettuceEncrypt;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ChineseLearningApp;
 
@@ -14,11 +17,19 @@ namespace ChineseLearningApp;
 // card: phones on the same Wi-Fi can open it, and so can anyone on the Internet
 // once the router forwards the port to this PC (NAT). Otherwise only this PC can.
 //
-// Its settings (port, others allowed) are in website-settings.json with the
-// app's other data; its database stays in the server folder there.
+// With https on (others allowed), it also answers on ports 80 and 443 under a
+// domain name, by default <WAN IP with dashes>.sslip.io, which always points at
+// that IP, with a free certificate from Let's Encrypt fetched and renewed by
+// LettuceEncrypt. Google sign-in needs that: it refuses pages opened by IP or
+// over http. The router must forward ports 80 and 443 to this PC.
+//
+// Its settings (port, others allowed, https) are in website-settings.json with
+// the app's other data; its database and certificates stay in the server folder there.
 internal static class StudyWebsite
 {
     public const int DefaultPort = 5080;
+    private static readonly string CertificateFolder = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ChineseLearningApp", "server", "https");
     private const string FirewallRule = "ChineseLearningApp Web";
     private static readonly string SettingsPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ChineseLearningApp", "website-settings.json");
@@ -29,7 +40,14 @@ internal static class StudyWebsite
 
     public static int Port { get; private set; } = DefaultPort;
     public static bool AllowOthers { get; private set; } = true;
+    public static bool Https { get; private set; }
+    public static string HttpsDomain { get; private set; } = string.Empty;
     public static bool Running => _app is not null;
+
+    // Whether this run answers over https (on, others allowed, a domain set).
+    public static bool ServesHttps { get; private set; }
+
+    public static string HttpsAddress => $"https://{HttpsDomain}";
 
     // Why the website is not running, or null.
     public static string? Problem { get; private set; }
@@ -49,9 +67,14 @@ internal static class StudyWebsite
     }
 
     // Starts again with others allowed or not.
-    public static async Task RestartAsync(bool allowOthers)
+    public static Task RestartAsync(bool allowOthers) => RestartAsync(allowOthers, Https, HttpsDomain);
+
+    // Starts again with others allowed or not, and https on or off for `domain`.
+    public static async Task RestartAsync(bool allowOthers, bool https, string domain)
     {
         AllowOthers = allowOthers;
+        Https = https;
+        HttpsDomain = domain.Trim().ToLowerInvariant();
         SaveSettings();
         await StopAsync().ConfigureAwait(false);
         _starting = Task.Run(StartCore);
@@ -75,21 +98,25 @@ internal static class StudyWebsite
 
     private static async Task StartCore()
     {
+        var https = Https && AllowOthers && IsDomainName(HttpsDomain);
         try
         {
-            var app = StudyServer.Create(
-            [
-                "--urls", AllowOthers ? $"http://*:{Port}" : $"http://localhost:{Port}",
-                "--Logging:LogLevel:Default", "Warning"
-            ], installed: true);
+            // With https, UseHttps names every port itself.
+            var app = StudyServer.Create(https
+                ? ["--Logging:LogLevel:Default", "Warning"]
+                : ["--urls", AllowOthers ? $"http://*:{Port}" : $"http://localhost:{Port}", "--Logging:LogLevel:Default", "Warning"],
+                installed: true, https ? UseHttps : null);
             await app.StartAsync().ConfigureAwait(false);
             _app = app;
+            ServesHttps = https;
             Problem = null;
         }
         catch (IOException ex) when (ex.InnerException is Microsoft.AspNetCore.Connections.AddressInUseException ||
                                      ex.Message.Contains("address already in use", StringComparison.OrdinalIgnoreCase))
         {
-            Problem = $"Cổng {Port} đang được chương trình khác dùng (có thể máy chủ học bản cũ đang chạy). Tắt nó rồi mở lại app.";
+            Problem = https
+                ? $"Cổng {Port}, 80 hoặc 443 đang được chương trình khác dùng (IIS, Skype, máy chủ web khác…). Tắt nó, hoặc tắt https."
+                : $"Cổng {Port} đang được chương trình khác dùng (có thể máy chủ học bản cũ đang chạy). Tắt nó rồi mở lại app.";
         }
         catch (Exception ex)
         {
@@ -97,6 +124,35 @@ internal static class StudyWebsite
         }
 
         Changed?.Invoke();
+    }
+
+    // Ports 80 (http, where Let's Encrypt checks the domain) and 443 (https,
+    // with the certificate it issues), besides the usual port.
+    private static void UseHttps(WebApplicationBuilder builder)
+    {
+        builder.Services.AddLettuceEncrypt(options =>
+            {
+                options.AcceptTermsOfService = true;
+                options.DomainNames = [HttpsDomain];
+            })
+            .PersistDataToDirectory(new DirectoryInfo(CertificateFolder), null);
+        builder.WebHost.ConfigureKestrel(kestrel =>
+        {
+            kestrel.ListenAnyIP(Port);
+            kestrel.ListenAnyIP(80);
+            kestrel.ListenAnyIP(443, listen => listen.UseHttps(https => https.UseLettuceEncrypt(kestrel.ApplicationServices)));
+        });
+    }
+
+    public static bool IsDomainName(string text) =>
+        Uri.CheckHostName(text) == UriHostNameType.Dns && text.Contains('.') && !text.EndsWith('.');
+
+    // <WAN IP with dashes>.sslip.io: a free name that always points at the IP
+    // the Internet sees for this network. Null when offline.
+    public static async Task<string?> DomainForInternetAddressAsync()
+    {
+        var address = await InternetAddressAsync().ConfigureAwait(false);
+        return address is null ? null : $"{new Uri(address).Host.Replace('.', '-')}.sslip.io";
     }
 
     // This PC's addresses in the home network (Wi-Fi or cable), for phones and
@@ -134,7 +190,7 @@ internal static class StudyWebsite
     {
         var rule = $"name=\"{FirewallRule}\"";
         var commands = $"/c netsh advfirewall firewall delete rule {rule} >nul & " +
-                       $"netsh advfirewall firewall add rule {rule} dir=in action=allow protocol=TCP localport={Port} profile=any";
+                       $"netsh advfirewall firewall add rule {rule} dir=in action=allow protocol=TCP localport={(Https ? $"{Port},80,443" : $"{Port}")} profile=any";
         try
         {
             using var process = Process.Start(new ProcessStartInfo("cmd.exe", commands)
@@ -167,6 +223,8 @@ internal static class StudyWebsite
             {
                 Port = settings.Port is > 0 and < 65536 ? settings.Port : DefaultPort;
                 AllowOthers = settings.AllowOthers;
+                Https = settings.Https;
+                HttpsDomain = settings.HttpsDomain ?? string.Empty;
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
@@ -180,7 +238,7 @@ internal static class StudyWebsite
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
-            File.WriteAllText(SettingsPath, JsonSerializer.Serialize(new Settings(Port, AllowOthers)), new UTF8Encoding(false));
+            File.WriteAllText(SettingsPath, JsonSerializer.Serialize(new Settings(Port, AllowOthers, Https, HttpsDomain)), new UTF8Encoding(false));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -188,5 +246,5 @@ internal static class StudyWebsite
         }
     }
 
-    private sealed record Settings(int Port, bool AllowOthers);
+    private sealed record Settings(int Port, bool AllowOthers, bool Https = false, string? HttpsDomain = null);
 }

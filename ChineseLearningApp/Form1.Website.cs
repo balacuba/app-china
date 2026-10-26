@@ -32,18 +32,90 @@ public sealed partial class Form1
         };
         string? internetAddress = null;
 
+        // https under a domain name, so Google sign-in works from outside.
+        var https = new CheckBox
+        {
+            AutoSize = true,
+            Checked = StudyWebsite.Https,
+            Text = "Bật https (để đăng nhập Google từ xa), tên miền:",
+            Font = new Font(UiFontName, 10.5F),
+            ForeColor = BodyTextColor,
+            BackColor = SurfaceColor,
+            Margin = new Padding(0, 6, 6, 0)
+        };
+        var domain = new TextBox
+        {
+            Width = 300,
+            Text = StudyWebsite.HttpsDomain,
+            PlaceholderText = "tự lấy từ IP WAN (…sslip.io)",
+            Font = new Font(UiFontName, 10.5F),
+            Margin = new Padding(0, 3, 6, 0)
+        };
+        var httpsRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, BackColor = SurfaceColor, Margin = new Padding(0, 0, 0, 6) };
+
+        string HttpsNote() =>
+            $"https: router cần chuyển thêm cổng 80 và 443 (TCP) về máy này; lần đầu mở {StudyWebsite.HttpsAddress}, chứng chỉ Let's Encrypt " +
+            "được xin tự động (khoảng 1 phút). Để đăng nhập Google: trong Google Cloud thêm " +
+            $"{StudyWebsite.HttpsAddress} vào Authorized JavaScript origins và {StudyWebsite.HttpsAddress}/api/oauth/google/callback vào Authorized redirect URIs.";
+
         void Show()
         {
             var network = StudyWebsite.NetworkAddresses();
             status.Text = StudyWebsite.Running
-                ? $"🟢 Trang web đang chạy (cổng {StudyWebsite.Port})"
+                ? $"🟢 Trang web đang chạy (cổng {StudyWebsite.Port}{(StudyWebsite.ServesHttps ? ", https 443" : "")})"
                 : StudyWebsite.Problem is { } problem ? $"⚠ {problem}" : "⏳ Đang khởi động trang web…";
             status.ForeColor = StudyWebsite.Running ? SuccessColor : StudyWebsite.Problem is null ? MutedTextColor : DangerText;
             addresses.Text = $"Trên máy này:  {StudyWebsite.LocalAddress}" + (StudyWebsite.AllowOthers
                 ? $"\nTrong mạng nhà (Wi-Fi/LAN):  {(network.Count > 0 ? string.Join("   ", network) : "(chưa kết nối mạng)")}" +
-                  $"\nTừ Internet:  {internetAddress ?? "bấm “Xem địa chỉ Internet”"}"
+                  $"\nTừ Internet:  {internetAddress ?? "bấm “Xem địa chỉ Internet”"}" +
+                  (StudyWebsite.ServesHttps ? $"\nQua https (đăng nhập Google được):  {StudyWebsite.HttpsAddress}" : "")
                 : "\n(Chỉ máy này mở được trang web.)");
+            httpsRow.Enabled = StudyWebsite.AllowOthers;
         }
+
+        // Starts the website again with https as chosen; the domain is the WAN
+        // IP's sslip.io name unless one is typed in.
+        async Task ApplyHttps()
+        {
+            httpsRow.Enabled = false;
+            allowOthers.Enabled = false;
+            var name = domain.Text.Trim().ToLowerInvariant();
+            if (https.Checked && name.Length == 0)
+            {
+                status.Text = "⏳ Đang lấy tên miền theo địa chỉ Internet…";
+                name = await StudyWebsite.DomainForInternetAddressAsync() ?? "";
+                domain.Text = name;
+            }
+
+            if (https.Checked && !StudyWebsite.IsDomainName(name))
+            {
+                note.Text = name.Length == 0
+                    ? "⚠ Không lấy được địa chỉ Internet. Kiểm tra mạng, hoặc gõ tên miền (ví dụ ten-ban.duckdns.org)."
+                    : "⚠ Tên miền không hợp lệ (ví dụ 14-241-68-10.sslip.io hoặc ten-ban.duckdns.org).";
+                https.Checked = false;
+                httpsRow.Enabled = true;
+                allowOthers.Enabled = true;
+                return;
+            }
+
+            status.Text = "⏳ Đang khởi động lại trang web…";
+            await StudyWebsite.RestartAsync(StudyWebsite.AllowOthers, https.Checked, name);
+            note.Text = StudyWebsite.ServesHttps ? HttpsNote() : "Đã tắt https.";
+            httpsRow.Enabled = true;
+            allowOthers.Enabled = true;
+            Show();
+        }
+
+        var applyHttps = CreateButton("Áp dụng", async (_, _) => await ApplyHttps(), secondary: true);
+        applyHttps.Margin = Padding.Empty;
+        https.CheckedChanged += async (_, _) =>
+        {
+            if (httpsRow.Enabled && https.Checked != StudyWebsite.Https)
+            {
+                await ApplyHttps();
+            }
+        };
+        httpsRow.Controls.AddRange([https, domain, applyHttps]);
 
         void Refresh()
         {
@@ -83,7 +155,8 @@ public sealed partial class Form1
             var address = StudyWebsite.AllowOthers
                 ? StudyWebsite.NetworkAddresses().FirstOrDefault() ?? StudyWebsite.LocalAddress
                 : StudyWebsite.LocalAddress;
-            var text = internetAddress?.StartsWith("http", StringComparison.Ordinal) == true ? internetAddress : address;
+            var text = StudyWebsite.ServesHttps ? StudyWebsite.HttpsAddress
+                : internetAddress?.StartsWith("http", StringComparison.Ordinal) == true ? internetAddress : address;
             try
             {
                 // Another program (a clipboard manager, Remote Desktop…) may hold
@@ -102,12 +175,14 @@ public sealed partial class Form1
             button.Enabled = false;
             note.Text = "⏳ Windows sẽ hỏi quyền quản trị để mở cổng trong tường lửa…";
             var problem = await StudyWebsite.OpenFirewallAsync();
-            note.Text = problem ?? $"✅ Tường lửa Windows đã cho phép cổng {StudyWebsite.Port}.";
+            note.Text = problem ?? $"✅ Tường lửa Windows đã cho phép cổng {StudyWebsite.Port}{(StudyWebsite.Https ? ", 80 và 443" : "")}.";
             button.Enabled = true;
         }, secondary: true);
         buttons.Controls.AddRange([openButton, internetButton, copyButton, firewallButton]);
 
-        note.Text = "Trang web chạy cùng app: tắt app thì trang web cũng tắt. Truy cập từ xa qua http không mã hóa, hãy dùng mật khẩu riêng cho trang học.";
+        note.Text = StudyWebsite.ServesHttps
+            ? HttpsNote()
+            : "Trang web chạy cùng app: tắt app thì trang web cũng tắt. Truy cập từ xa qua http không mã hóa: bật https để mã hóa và để đăng nhập Google từ xa.";
         Show();
 
         var body = new FlowLayoutPanel
@@ -118,7 +193,7 @@ public sealed partial class Form1
             BackColor = SurfaceColor,
             Padding = new Padding(0, 4, 0, 0)
         };
-        body.Controls.AddRange([status, addresses, allowOthers, buttons, note]);
+        body.Controls.AddRange([status, addresses, allowOthers, httpsRow, buttons, note]);
         return CreateSettingsSection("🌐", Color.FromArgb(254, 226, 226), "Trang web học",
             "App chạy luôn trang web học: mở trên trình duyệt máy này, điện thoại cùng Wi-Fi, hoặc từ xa qua Internet.", body);
     }

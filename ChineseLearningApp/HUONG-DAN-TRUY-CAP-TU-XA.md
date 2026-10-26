@@ -32,9 +32,25 @@ Bấm **🌐 Mở trang web**, hoặc mở trình duyệt vào `http://localhost
 - **Địa chỉ Internet thay đổi:** phần lớn gói cước gia đình đổi IP sau mỗi lần router khởi động lại. Có thể bật **DDNS** trong router (No-IP, DynDNS…) để có một tên cố định.
 - Máy tính phải **đang bật và đang mở app**: tắt app là trang web tắt.
 
+## 4. https (mã hóa, và đăng nhập Google từ xa)
+
+Google không cho đăng nhập trên trang mở bằng địa chỉ IP hay bằng `http`. App có sẵn https miễn phí theo tên miền **`<IP WAN có gạch ngang>.sslip.io`**: tên này luôn trỏ về IP WAN, không phải đăng ký. Ví dụ IP `14.241.68.10` thì tên miền là `14-241-68-10.sslip.io`.
+
+1. Trên router, chuyển thêm **cổng 80 và 443 (TCP)** về máy chạy app, cùng cách với cổng `5080` ở mục 3. Ví dụ cổng ngoài `443` vào cổng trong `443`.
+2. Trong app vào **Cài đặt → Trang web học**, tích **Bật https**. Để trống ô tên miền thì app tự điền theo IP WAN; có tên miền riêng (DuckDNS, No-IP…) thì gõ vào rồi bấm **Áp dụng**.
+3. Bấm **🛡 Mở cổng tường lửa**: Windows sẽ cho phép cả cổng 80 và 443.
+4. Mở `https://14-241-68-10.sslip.io` (thay bằng tên miền của bạn) từ mạng khác. Lần đầu, app tự xin chứng chỉ Let's Encrypt miễn phí (khoảng 1 phút) và tự gia hạn sau đó.
+5. Để đăng nhập Google qua địa chỉ này: trong Google Cloud → client OAuth, thêm `https://14-241-68-10.sslip.io` vào **Authorized JavaScript origins** và `https://14-241-68-10.sslip.io/api/oauth/google/callback` vào **Authorized redirect URIs**.
+
+Lưu ý:
+- Không gõ `https://` với cổng `5080`: cổng đó chỉ chạy `http`. https luôn ở cổng 443, tức địa chỉ không ghi số cổng.
+- IP WAN đổi thì tên `…sslip.io` cũng đổi: tắt https, xóa ô tên miền rồi bật lại, rồi sửa địa chỉ trong Google Cloud. Muốn tên cố định thì dùng DDNS (DuckDNS miễn phí) và gõ tên đó vào ô tên miền.
+- Cổng 80 hoặc 443 đang bị chương trình khác dùng (IIS, máy chủ web khác) thì app báo lỗi; tắt chương trình đó hoặc tắt https.
+- Một số nhà mạng chặn cổng 80/443 cho gói gia đình; khi đó Let's Encrypt không cấp được chứng chỉ.
+
 ## Lưu ý an toàn
 
-- Trang web chạy bằng `http` (không mã hóa). Mở ra Internet thì mật khẩu và tiến độ học đi qua mạng không mã hóa. Hãy dùng **mật khẩu riêng cho trang học**, không trùng mật khẩu email hay ngân hàng. Không cần dùng từ xa nữa thì xóa dòng chuyển cổng trên router.
+- Trang web ở cổng `5080` chạy bằng `http` (không mã hóa). Mở ra Internet thì nên bật https (mục 4) và dùng địa chỉ https. Dù vậy, hãy dùng **mật khẩu riêng cho trang học**, không trùng mật khẩu email hay ngân hàng. Không cần dùng từ xa nữa thì xóa dòng chuyển cổng trên router.
 - Nhập sai mật khẩu 5 lần liên tiếp thì tài khoản bị khóa 1 phút.
-- **Đăng nhập bằng Google chỉ dùng được trên chính máy này** (`http://localhost`). Google không cho đăng nhập trên trang `http://<địa chỉ IP>`. Từ máy khác hãy đăng nhập bằng tên và mật khẩu.
+- **Đăng nhập bằng Google** chỉ dùng được trên chính máy này (`http://localhost`) hoặc qua địa chỉ https có tên miền (mục 4). Google không cho đăng nhập trên trang `http://<địa chỉ IP>`.
 - Bỏ tích **Cho máy khác mở trang web** thì chỉ máy này mở được trang web.

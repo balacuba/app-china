@@ -16,7 +16,8 @@ namespace ChineseLearningServer;
 // %LOCALAPPDATA%\ChineseLearningApp\server.
 public static class StudyServer
 {
-    public static WebApplication Create(string[] args, bool installed)
+    // `configure` adds to the host before it is built (the desktop app's https).
+    public static WebApplication Create(string[] args, bool installed, Action<WebApplicationBuilder>? configure = null)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
@@ -61,6 +62,7 @@ public static class StudyServer
             builder.Configuration["VocabularyPath"] ?? Path.Combine(AppContext.BaseDirectory, "Data", "vocabulary-starter.json"),
             contentRoot);
 
+        configure?.Invoke(builder);
         var app = builder.Build();
         app.UseResponseCompression();
         app.UseDefaultFiles();
