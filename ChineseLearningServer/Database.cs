@@ -44,6 +44,113 @@ public sealed class Database(string path)
                 Document TEXT NOT NULL,
                 UpdatedAt TEXT NOT NULL);
             """);
+
+        // Accounts signed in with Google carry Google's id for the account.
+        // Added to databases made before Google sign-in existed.
+        using var columns = connection.CreateCommand();
+        columns.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Users') WHERE name = 'GoogleSub'";
+        if ((long)columns.ExecuteScalar()! == 0)
+        {
+            Execute(connection, "ALTER TABLE Users ADD COLUMN GoogleSub TEXT");
+        }
+
+        Execute(connection, "CREATE UNIQUE INDEX IF NOT EXISTS UsersByGoogleSub ON Users(GoogleSub) WHERE GoogleSub IS NOT NULL");
+
+        // A learner's permission for this server to use Gemini for them: their
+        // Google refresh token, encrypted for the Windows account the server runs as.
+        Execute(connection, """
+            CREATE TABLE IF NOT EXISTS GeminiGrants (
+                UserId INTEGER PRIMARY KEY REFERENCES Users(Id) ON DELETE CASCADE,
+                RefreshToken BLOB NOT NULL,
+                UpdatedAt TEXT NOT NULL);
+            """);
+    }
+
+    public void SaveGeminiGrant(long userId, string refreshToken)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO GeminiGrants (UserId, RefreshToken, UpdatedAt) VALUES ($user, $token, $now)
+            ON CONFLICT(UserId) DO UPDATE SET RefreshToken = $token, UpdatedAt = $now
+            """;
+        command.Parameters.AddWithValue("$user", userId);
+        command.Parameters.AddWithValue("$token", Protect(refreshToken));
+        command.Parameters.AddWithValue("$now", Now());
+        command.ExecuteNonQuery();
+    }
+
+    // The learner's refresh token, or null when they have not allowed Gemini
+    // (or it can no longer be read, e.g. the database moved to another PC).
+    public string? LoadGeminiGrant(long userId)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT RefreshToken FROM GeminiGrants WHERE UserId = $user";
+        command.Parameters.AddWithValue("$user", userId);
+        if (command.ExecuteScalar() is not byte[] stored)
+        {
+            return null;
+        }
+
+        try
+        {
+            return Encoding.UTF8.GetString(OperatingSystem.IsWindows()
+                ? ProtectedData.Unprotect(stored, null, DataProtectionScope.CurrentUser)
+                : stored);
+        }
+        catch (CryptographicException)
+        {
+            return null;
+        }
+    }
+
+    public void DeleteGeminiGrant(long userId)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM GeminiGrants WHERE UserId = $user";
+        command.Parameters.AddWithValue("$user", userId);
+        command.ExecuteNonQuery();
+    }
+
+    // Encrypted with Windows (DPAPI) for the account the server runs as; the
+    // server is built for Windows, elsewhere it is stored as it is.
+    private static byte[] Protect(string text) => OperatingSystem.IsWindows()
+        ? ProtectedData.Protect(Encoding.UTF8.GetBytes(text), null, DataProtectionScope.CurrentUser)
+        : Encoding.UTF8.GetBytes(text);
+
+    // The account for a Google sign-in, made on first use with the Gmail
+    // address as its name. It has no usable password: it signs in with Google.
+    public (long Id, string UserName) FindOrCreateGoogleUser(GoogleIdentity identity)
+    {
+        using var connection = Open();
+        using (var find = connection.CreateCommand())
+        {
+            find.CommandText = "SELECT Id, UserName FROM Users WHERE GoogleSub = $sub";
+            find.Parameters.AddWithValue("$sub", identity.Subject);
+            using var reader = find.ExecuteReader();
+            if (reader.Read())
+            {
+                return (reader.GetInt64(0), reader.GetString(1));
+            }
+        }
+
+        using var create = connection.CreateCommand();
+        create.CommandText = """
+            INSERT INTO Users (UserName, PasswordHash, Salt, CreatedAt, GoogleSub) VALUES ($name, $hash, $salt, $now, $sub)
+            ON CONFLICT(UserName) DO UPDATE SET GoogleSub = $sub WHERE GoogleSub IS NULL
+            RETURNING Id, UserName;
+            """;
+        create.Parameters.AddWithValue("$name", identity.Email);
+        create.Parameters.AddWithValue("$hash", RandomNumberGenerator.GetBytes(32));
+        create.Parameters.AddWithValue("$salt", RandomNumberGenerator.GetBytes(16));
+        create.Parameters.AddWithValue("$now", Now());
+        create.Parameters.AddWithValue("$sub", identity.Subject);
+        using var created = create.ExecuteReader();
+        return created.Read()
+            ? (created.GetInt64(0), created.GetString(1))
+            : throw new InvalidOperationException("Địa chỉ Gmail này đã gắn với một tài khoản Google khác.");
     }
 
     // Null when the name is taken.

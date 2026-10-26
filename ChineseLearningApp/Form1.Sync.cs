@@ -27,6 +27,7 @@ public sealed partial class Form1
     // Called from the constructor before the session state is saved on close.
     private void InitializeSync()
     {
+        GeminiAi.StudyServer = _sync;
         _syncDelay.Tick += async (_, _) =>
         {
             _syncDelay.Stop();
@@ -175,6 +176,8 @@ public sealed partial class Form1
         ShowSyncStatus("⏳ Đang đồng bộ…", MutedTextColor);
         try
         {
+            // The app's own website may still be starting.
+            await StudyWebsite.Starting;
             var started = CurrentProgress();
             var synced = await _sync.SyncAsync(started, _syncClosing.Token);
             if (IsDisposed)
@@ -333,6 +336,25 @@ public sealed partial class Form1
             await RunSyncAsync(fromButton: true);
         }
 
+        // Gmail: signs in on the website in the browser, which hands this PC a token.
+        async Task SignInWithGoogle()
+        {
+            buttons.Enabled = false;
+            ShowSyncStatus("⏳ Đã mở trình duyệt: đăng nhập bằng Google rồi bấm “Cho phép”…", MutedTextColor);
+            var problem = await _sync.SignInThroughBrowserAsync(server.Text, _syncClosing.Token);
+            buttons.Enabled = true;
+            if (problem is not null)
+            {
+                ShowSyncStatus($"⚠ {problem}", DangerText);
+                return;
+            }
+
+            Activate();
+            _updateSyncCard?.Invoke();
+            await RunSyncAsync(fromButton: true);
+        }
+
+        var googleButton = CreateButton("G  Đăng nhập bằng Google", async (_, _) => await SignInWithGoogle(), secondary: true);
         var signInButton = CreateButton("🔑  Đăng nhập", async (_, _) => await SignIn(register: false));
         var registerButton = CreateButton("➕  Tạo tài khoản", async (_, _) => await SignIn(register: true), secondary: true);
         var syncButton = CreateButton("🔄  Đồng bộ ngay", async (_, _) => await RunSyncAsync(fromButton: true));
@@ -342,13 +364,16 @@ public sealed partial class Form1
             _updateSyncCard?.Invoke();
             ShowSyncStatus("Đã đăng xuất. Tiến độ vẫn được lưu trên máy này.", MutedTextColor);
         }, secondary: true);
-        buttons.Controls.AddRange([signInButton, registerButton, syncButton, signOutButton]);
+        buttons.Controls.AddRange([googleButton, signInButton, registerButton, syncButton, signOutButton]);
 
         _updateSyncCard = () =>
         {
             var signedIn = _sync.SignedIn;
+            // A new sign-in may allow Gemini through the server again.
+            GeminiAi.TryServerAgain();
             fields.Visible = !signedIn;
             signInButton.Visible = !signedIn;
+            googleButton.Visible = !signedIn;
             registerButton.Visible = !signedIn;
             signedInLabel.Visible = signedIn;
             syncButton.Visible = signedIn;

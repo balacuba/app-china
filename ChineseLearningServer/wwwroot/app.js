@@ -96,7 +96,13 @@ function showSignIn(message = '') {
           <div class="breathe">${mochiCat({ coat: 'grey', mood: 'smile' })}</div>
         </div>
         <h1>Học tiếng Trung</h1>
-        <p class="muted">Đăng nhập cùng tài khoản trên web và app để đồng bộ tiến độ học.</p>
+        <p class="muted">${pendingDesktopLogin()
+          ? 'Đăng nhập để kết nối app Học tiếng Trung trên máy tính với tài khoản của bạn.'
+          : 'Đăng nhập cùng tài khoản trên web và app để đồng bộ tiến độ học.'}</p>
+        <div id="google-area" class="google-area" hidden>
+          <div id="google-button"></div>
+          <p class="or"><span>hoặc dùng tên đăng nhập</span></p>
+        </div>
         <div class="tabs" role="tablist">
           <button type="button" data-mode="login" class="${mode === 'login' ? 'on' : ''}">Đăng nhập</button>
           <button type="button" data-mode="register" class="${mode === 'register' ? 'on' : ''}">Tạo tài khoản</button>
@@ -141,8 +147,175 @@ function showSignIn(message = '') {
       }
     });
     view.querySelector('#user').focus();
+    showGoogleButton(message => { view.querySelector('#auth-error').textContent = message; });
   };
   render();
+}
+
+// "Sign in with Google", when this server has a Google client ID: Google's own
+// button (its script from accounts.google.com) hands back a signed credential,
+// which the server checks with Google before signing the Gmail account in.
+let siteConfig = null;
+let googleScript = null;
+
+const GOOGLE_LOGO = `<svg viewBox="0 0 48 48" width="20" height="20" aria-hidden="true">
+  <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.7 13.3l7.9 6.1C12.5 13.6 17.8 9.5 24 9.5z"/>
+  <path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.3-4.6 7l7.5 5.8c4.4-4 6.8-10 6.8-17.3z"/>
+  <path fill="#FBBC05" d="M10.6 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.1C1 16.6 0 20.2 0 24s1 7.4 2.7 10.7l7.9-6.1z"/>
+  <path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.5-5.8c-2.1 1.4-4.8 2.3-8.4 2.3-6.2 0-11.5-4.1-13.4-9.8l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/>
+</svg>`;
+
+// Back from Google's sign-in page: #/google-done?ticket=… is traded for a
+// sign-in, then the page the learner started from is shown.
+async function finishGoogleSignIn() {
+  const [path, query] = location.hash.replace(/^#\/?/, '').split('?');
+  if (path !== 'google-done') return false;
+  const ticket = new URLSearchParams(query ?? '').get('ticket') ?? '';
+  history.replaceState(null, '', '#/');
+  try {
+    const response = await fetch('/api/login/ticket', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticket })
+    });
+    const reply = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      showSignIn(reply.error ?? 'Không đăng nhập được bằng Google. Hãy thử lại.');
+      return true;
+    }
+    history.replaceState(null, '', reply.returnTo || '#/');
+    signedIn(reply.token, reply.userName);
+  } catch {
+    showSignIn('Không kết nối được máy chủ.');
+  }
+  return true;
+}
+
+// Why Google's sign-in page sent the learner back without signing in.
+function googleProblem() {
+  const why = new URLSearchParams(location.hash.split('?')[1] ?? '').get('google');
+  return {
+    expired: 'Phiên đăng nhập Google đã hết hạn. Hãy bấm đăng nhập lại.',
+    cancelled: 'Bạn đã hủy đăng nhập bằng Google.',
+    failed: 'Google không xác nhận được tài khoản này. Hãy thử lại.'
+  }[why] ?? '';
+}
+
+async function showGoogleButton(showError) {
+  try {
+    siteConfig ??= await fetch('/api/config').then(response => response.json());
+  } catch {
+    return;
+  }
+  const clientId = siteConfig?.googleClientId;
+  const area = view.querySelector('#google-area');
+  if (!clientId || !area) return;
+  if (siteConfig.googleRedirectLogin) {
+    // Google's own sign-in page, which also asks to use Gemini for the learner;
+    // it comes back to this page (or to the desktop app's request).
+    const returnTo = pendingDesktopLogin() ? location.hash : '#/';
+    view.querySelector('#google-button').innerHTML =
+      `<a class="google-link" href="/api/oauth/google/start?returnTo=${encodeURIComponent(returnTo)}">${GOOGLE_LOGO}<span>Đăng nhập bằng Google</span></a>`;
+    area.hidden = false;
+    return;
+  }
+  googleScript ??= new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.append(script);
+  });
+  try {
+    await googleScript;
+  } catch {
+    googleScript = null;
+    showError('Không tải được nút đăng nhập Google. Kiểm tra mạng Internet.');
+    return;
+  }
+  if (!document.body.contains(area)) return;
+  google.accounts.id.initialize({
+    client_id: clientId,
+    ux_mode: 'popup',
+    callback: async ({ credential }) => {
+      try {
+        const response = await fetch('/api/login/google', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ credential })
+        });
+        const reply = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          showError(reply.error ?? 'Không đăng nhập được bằng Google. Hãy thử lại.');
+          return;
+        }
+        signedIn(reply.token, reply.userName);
+      } catch {
+        showError('Không kết nối được máy chủ.');
+      }
+    }
+  });
+  google.accounts.id.renderButton(view.querySelector('#google-button'), {
+    theme: 'outline', size: 'large', shape: 'pill', text: 'signin_with', locale: 'vi', width: 300
+  });
+  area.hidden = false;
+}
+
+// ---------- signing the desktop app in through the website ----------
+
+// The desktop app opens #/desktop-login?port=…&state=… and waits on that port
+// of this PC; once signed in here, the learner allows it and the page posts a
+// token of the app's own to it (never in the address bar).
+function pendingDesktopLogin() {
+  const [path, query] = location.hash.replace(/^#\/?/, '').split('?');
+  if (path !== 'desktop-login') return null;
+  const params = new URLSearchParams(query ?? '');
+  const port = Number(params.get('port'));
+  const nonce = params.get('state') ?? '';
+  return Number.isInteger(port) && port >= 1024 && port <= 65535 && /^[A-Za-z0-9_-]{16,64}$/.test(nonce)
+    ? { port, state: nonce }
+    : null;
+}
+
+function showDesktopLogin(request) {
+  view.innerHTML = html`
+    <section class="card auth">
+      <div class="cats">
+        <div class="breathe">${mochiCat({ coat: 'white', mood: 'happy', tail: -1 })}</div>
+        <div class="breathe">${mochiCat({ coat: 'grey', mood: 'surprised' })}</div>
+      </div>
+      <h1>Kết nối app trên máy tính</h1>
+      <p>App <b>Học tiếng Trung</b> trên máy tính này muốn đăng nhập bằng tài khoản <b>${escape(state.userName)}</b> để đồng bộ tiến độ học.</p>
+      <p class="error" id="desktop-error"></p>
+      <div class="controls">
+        <button class="primary" id="allow" type="button">Cho phép</button>
+        <a class="button ghost" href="#/">Không, về trang chủ</a>
+      </div>
+    </section>`;
+  view.querySelector('#allow').addEventListener('click', async event => {
+    event.target.disabled = true;
+    try {
+      const response = await fetch('/api/tokens', { method: 'POST', headers: { Authorization: `Bearer ${state.token}` } });
+      if (!response.ok) throw new Error(String(response.status));
+      const reply = await response.json();
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = `http://127.0.0.1:${request.port}/callback`;
+      for (const [name, value] of Object.entries({ token: reply.token, userName: reply.userName, state: request.state })) {
+        const field = document.createElement('input');
+        field.type = 'hidden';
+        field.name = name;
+        field.value = value;
+        form.append(field);
+      }
+      document.body.append(form);
+      form.submit();
+    } catch {
+      event.target.disabled = false;
+      view.querySelector('#desktop-error').textContent = 'Không kết nối được. Hãy bấm "Đăng nhập bằng Google" trong app một lần nữa.';
+    }
+  });
 }
 
 function signedIn(token, userName) {
@@ -681,11 +854,17 @@ const routes = {
 };
 
 async function route() {
+  if (await finishGoogleSignIn()) return;
   if (!state.token) {
-    showSignIn();
+    showSignIn(googleProblem());
     return;
   }
   document.getElementById('bar').hidden = false;
+  const desktopLogin = pendingDesktopLogin();
+  if (desktopLogin) {
+    showDesktopLogin(desktopLogin);
+    return;
+  }
   await loadWords();
   const page = location.hash.replace(/^#\/?/, '');
   const show = routes[page] ?? showHome;

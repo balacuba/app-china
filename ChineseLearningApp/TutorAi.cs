@@ -38,6 +38,9 @@ internal static class TutorAi
 
     public static bool HasKey => AiKeyStore.Gemini.HasKey;
 
+    // A key, or the study server's Google sign-in instead of one.
+    public static bool CanAsk => HasKey || GeminiAi.ThroughServer;
+
     // Asks Gemini for a JSON object; the prompt describes the fields.
     public static Task<JsonElement> AskJsonAsync(string system, string question, string working, IProgress<string> progress, CancellationToken cancellation) =>
         GeminiAi.AskJsonAsync(system, question, working, progress, cancellation);

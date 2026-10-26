@@ -18,6 +18,14 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ChineseLearning.Sync\ChineseLearning.Sync.csproj" />
+    <!-- The study website runs inside the app (StudyWebsite.cs). -->
+    <ProjectReference Include="..\ChineseLearningServer\ChineseLearningServer.csproj" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The website's pages, served from wwwroot beside the app. -->
+    <Content Include="..\ChineseLearningServer\wwwroot\**" LinkBase="wwwroot" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

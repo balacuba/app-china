@@ -185,7 +185,9 @@ internal sealed class TranslationPractice : Panel
 
         ShowChoices();
         ShowPinyin();
-        SetBusy(false, TutorAi.HasKey ? string.Empty : "Cần API key Gemini miễn phí: bấm nút 🔑 để nhập.");
+        SetBusy(false, TutorAi.HasKey ? string.Empty
+            : GeminiAi.ThroughServer ? "Dùng Gemini qua tài khoản Google đã đăng nhập đồng bộ (không cần API key)."
+            : "Cần API key Gemini miễn phí: bấm nút 🔑 để nhập, hoặc đăng nhập đồng bộ bằng Google.");
     }
 
     private static Label Caption(string text, int left = 0, int top = 9) => new()

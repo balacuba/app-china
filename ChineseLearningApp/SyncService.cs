@@ -21,6 +21,8 @@ internal sealed class SyncService
     public const string DefaultServer = "http://localhost:5080";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(15) };
+    // Answers from Gemini take longer than a sync.
+    private static readonly HttpClient GeminiHttp = new() { Timeout = TimeSpan.FromSeconds(90) };
     private static readonly string Folder = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ChineseLearningApp");
 
@@ -44,6 +46,10 @@ internal sealed class SyncService
             // Unreadable settings: start signed out with the default server.
         }
     }
+
+    // Opens a page in the learner's browser (replaceable in tests).
+    public Action<string> OpenInBrowser { get; set; } = url =>
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
 
     public string ServerUrl { get; private set; } = DefaultServer;
     public string UserName { get; private set; } = string.Empty;
@@ -90,6 +96,147 @@ internal sealed class SyncService
         {
             return $"Không kết nối được máy chủ {server}.";
         }
+    }
+
+    // Signs in with Google (or any way the website offers) through the browser:
+    // waits on a free port of this PC, opens the website's page for signing the
+    // app in, and takes the token the page posts back once the learner allows
+    // it. The random state proves the answer is to this request. Returns null
+    // when it worked, otherwise what to tell the learner.
+    public async Task<string?> SignInThroughBrowserAsync(string server, CancellationToken cancellation)
+    {
+        server = server.Trim().TrimEnd('/');
+        if (!Uri.TryCreate(server, UriKind.Absolute, out var address) || address.Scheme is not ("http" or "https"))
+        {
+            return "Địa chỉ máy chủ không hợp lệ (ví dụ http://localhost:5080).";
+        }
+
+        var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            var state = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24))
+                .Replace('+', '-').Replace('/', '_').TrimEnd('=');
+            OpenInBrowser($"{server}/#/desktop-login?port={port}&state={state}");
+
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+            timeout.CancelAfter(TimeSpan.FromMinutes(5));
+            while (true)
+            {
+                using var client = await listener.AcceptTcpClientAsync(timeout.Token).ConfigureAwait(false);
+                var form = await ReadPostedForm(client, timeout.Token).ConfigureAwait(false);
+                var matches = form is not null && form.GetValueOrDefault("state") == state &&
+                    form.GetValueOrDefault("token") is { Length: > 0 } && form.GetValueOrDefault("userName") is { Length: > 0 };
+                await Reply(client, matches
+                    ? "Đã kết nối app với tài khoản của bạn. Bạn có thể đóng trang này và quay lại app."
+                    : "Yêu cầu không khớp với app đang chờ. Hãy bấm đăng nhập trong app một lần nữa.").ConfigureAwait(false);
+                if (!matches)
+                {
+                    continue;
+                }
+
+                if (!string.Equals(form!["userName"], UserName, StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(server, ServerUrl, StringComparison.OrdinalIgnoreCase))
+                {
+                    File.Delete(_basePath);
+                }
+
+                ServerUrl = server;
+                UserName = form["userName"];
+                _token.Save(form["token"]);
+                SaveSettings();
+                return null;
+            }
+        }
+        catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
+        {
+            return "Hết thời gian chờ đăng nhập trong trình duyệt. Hãy thử lại.";
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            return $"Không mở được trình duyệt. Hãy mở {server} rồi thử lại.";
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    // The fields of a small form POST (application/x-www-form-urlencoded), or
+    // null for anything else.
+    private static async Task<Dictionary<string, string>?> ReadPostedForm(System.Net.Sockets.TcpClient client, CancellationToken cancellation)
+    {
+        var stream = client.GetStream();
+        var buffer = new byte[16 * 1024];
+        var length = 0;
+        int headerEnd;
+        while ((headerEnd = IndexOf(buffer, length, "\r\n\r\n"u8)) < 0)
+        {
+            if (length == buffer.Length)
+            {
+                return null;
+            }
+
+            var read = await stream.ReadAsync(buffer.AsMemory(length), cancellation).ConfigureAwait(false);
+            if (read == 0)
+            {
+                return null;
+            }
+
+            length += read;
+        }
+
+        var headers = Encoding.ASCII.GetString(buffer, 0, headerEnd).Split("\r\n");
+        if (!headers[0].StartsWith("POST /callback ", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var contentLength = headers.Skip(1)
+            .Select(line => line.Split(':', 2))
+            .Where(parts => parts.Length == 2 && parts[0].Trim().Equals("Content-Length", StringComparison.OrdinalIgnoreCase))
+            .Select(parts => int.TryParse(parts[1].Trim(), out var value) ? value : -1)
+            .FirstOrDefault(-1);
+        var bodyStart = headerEnd + 4;
+        if (contentLength < 0 || bodyStart + contentLength > buffer.Length)
+        {
+            return null;
+        }
+
+        while (length < bodyStart + contentLength)
+        {
+            var read = await stream.ReadAsync(buffer.AsMemory(length), cancellation).ConfigureAwait(false);
+            if (read == 0)
+            {
+                return null;
+            }
+
+            length += read;
+        }
+
+        var body = Encoding.ASCII.GetString(buffer, bodyStart, contentLength);
+        return body.Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .Select(pair => pair.Split('=', 2))
+            .Where(pair => pair.Length == 2)
+            .GroupBy(pair => Uri.UnescapeDataString(pair[0].Replace('+', ' ')))
+            .ToDictionary(group => group.Key, group => Uri.UnescapeDataString(group.First()[1].Replace('+', ' ')));
+    }
+
+    private static int IndexOf(byte[] buffer, int length, ReadOnlySpan<byte> pattern) =>
+        buffer.AsSpan(0, length).IndexOf(pattern);
+
+    private static async Task Reply(System.Net.Sockets.TcpClient client, string message)
+    {
+        var page = Encoding.UTF8.GetBytes(
+            "<!doctype html><html lang=\"vi\"><meta charset=\"utf-8\"><title>Học tiếng Trung</title>" +
+            "<body style=\"font-family:Segoe UI,sans-serif;background:#fff7f0;color:#4a2f23;display:grid;place-items:center;height:100vh;margin:0\">" +
+            $"<p style=\"font-size:20px;max-width:520px;text-align:center\">{System.Net.WebUtility.HtmlEncode(message)}</p></body></html>");
+        var head = Encoding.ASCII.GetBytes(
+            $"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {page.Length}\r\nConnection: close\r\n\r\n");
+        var stream = client.GetStream();
+        await stream.WriteAsync(head).ConfigureAwait(false);
+        await stream.WriteAsync(page).ConfigureAwait(false);
     }
 
     public void SignOut()
@@ -220,7 +367,26 @@ internal sealed class SyncService
         return (await response.Content.ReadFromJsonAsync<ProgressEnvelope>(Json, cancellation).ConfigureAwait(false), false);
     }
 
-    private static async Task<string> ErrorText(HttpResponseMessage response, CancellationToken cancellation)
+    // A Gemini request sent through the study server, which asks Gemini with the
+    // learner's Google account (signed in with Google there, Gemini allowed).
+    // Null when signed out. The caller reads and disposes the reply.
+    public async Task<HttpResponseMessage?> SendGeminiAsync(string payload, CancellationToken cancellation)
+    {
+        var token = _token.Load();
+        if (!SignedIn || token.Length == 0)
+        {
+            return null;
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{ServerUrl}/api/gemini/generate")
+        {
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return await GeminiHttp.SendAsync(request, cancellation).ConfigureAwait(false);
+    }
+
+    public static async Task<string> ErrorText(HttpResponseMessage response, CancellationToken cancellation)
     {
         try
         {

@@ -8,8 +8,24 @@ namespace ChineseLearningApp;
 
 // Google Gemini through its REST API, with the learner's own free API key from
 // Google AI Studio. Every question asks for a JSON object back.
+//
+// Signed in to the study server with Google (Gemini allowed there), no key is
+// needed: questions go through the server, which asks Gemini with the learner's
+// own Google account. If the server cannot, the key is used.
 internal static partial class GeminiAi
 {
+    // The study server this PC syncs with (set by Form1).
+    public static SyncService? StudyServer { get; set; }
+
+    // Set once the server has said it cannot ask Gemini for this learner, until
+    // they sign in again.
+    private static bool _serverRefused;
+
+    public static void TryServerAgain() => _serverRefused = false;
+
+    // Whether questions can go through the study server, so no key is needed.
+    public static bool ThroughServer => StudyServer is { SignedIn: true } && !_serverRefused;
+
     // Always the newest Flash-Lite model on the free tier, so the app need not change
     // when Google retires a model version. Flash-Lite answers in a second or two;
     // the full Flash model thinks at length and could take minutes.
@@ -51,9 +67,10 @@ internal static partial class GeminiAi
     public static async Task<JsonElement> AskJsonAsync(string system, string question, string working, IProgress<string> progress, CancellationToken cancellation)
     {
         var key = AiKeyStore.Gemini.Load();
-        if (key.Length == 0)
+        var throughServer = ThroughServer;
+        if (!throughServer && key.Length == 0)
         {
-            throw new AiException("Hãy nhập API key Gemini trước (nút 🔑).", needsKey: true);
+            throw new AiException("Hãy nhập API key Gemini trước (nút 🔑), hoặc đăng nhập đồng bộ bằng Google.", needsKey: true);
         }
 
         Exception? last = null;
@@ -62,7 +79,25 @@ internal static partial class GeminiAi
             progress.Report(working);
             try
             {
-                return await AskOnceAsync(key, system, question, cancellation);
+                return await AskOnceAsync(throughServer ? null : key, system, question, cancellation);
+            }
+            catch (ServerRefusedException refused)
+            {
+                _serverRefused = true;
+                throughServer = false;
+                if (key.Length == 0)
+                {
+                    throw new AiException($"{refused.Message} Hoặc nhập API key Gemini (nút 🔑).", needsKey: true);
+                }
+
+                // Asked again with the key, without counting this try.
+                attempt--;
+            }
+            catch (HttpRequestException) when (throughServer && key.Length > 0)
+            {
+                // The study server is not running: the key works without it.
+                throughServer = false;
+                attempt--;
             }
             catch (RetryLaterException wait)
             {
@@ -91,7 +126,8 @@ internal static partial class GeminiAi
         };
     }
 
-    private static async Task<JsonElement> AskOnceAsync(string key, string system, string question, CancellationToken cancellation)
+    // `key` is the learner's API key, or null to go through the study server.
+    private static async Task<JsonElement> AskOnceAsync(string? key, string system, string question, CancellationToken cancellation)
     {
         var payload = JsonSerializer.Serialize(new
         {
@@ -100,12 +136,17 @@ internal static partial class GeminiAi
             // A little below the default: still varied, but steadier and more coherent.
             generationConfig = new { responseMimeType = "application/json", temperature = 0.7 }
         });
-        using var request = new HttpRequestMessage(HttpMethod.Post, Endpoint)
+        using var response = key is null
+            ? await (StudyServer?.SendGeminiAsync(payload, cancellation) ?? Task.FromResult<HttpResponseMessage?>(null)) ?? throw new ServerRefusedException("Chưa đăng nhập đồng bộ bằng Google.")
+            : await SendWithKey(key, payload, cancellation);
+        if (key is null && response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden
+                or HttpStatusCode.NotFound or HttpStatusCode.PreconditionFailed)
         {
-            Content = new StringContent(payload, Encoding.UTF8, "application/json")
-        };
-        request.Headers.Add("x-goog-api-key", key);
-        using var response = await Http.SendAsync(request, cancellation);
+            // Signed out there, Gemini not allowed (any more), or not switched on
+            // for the server's Google project.
+            throw new ServerRefusedException(await SyncService.ErrorText(response, cancellation));
+        }
+
         var body = await response.Content.ReadAsStringAsync(cancellation);
         if (!response.IsSuccessStatusCode)
         {
@@ -141,6 +182,16 @@ internal static partial class GeminiAi
 
         using var json = JsonDocument.Parse(reply[start..(end + 1)]);
         return json.RootElement.Clone();
+    }
+
+    private static async Task<HttpResponseMessage> SendWithKey(string key, string payload, CancellationToken cancellation)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, Endpoint)
+        {
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+        };
+        request.Headers.Add("x-goog-api-key", key);
+        return await Http.SendAsync(request, cancellation);
     }
 
     // Turns an error reply into something the learner can act on.
@@ -185,4 +236,6 @@ internal static partial class GeminiAi
     {
         public int Seconds { get; } = seconds;
     }
+
+    private sealed class ServerRefusedException(string message) : Exception(message);
 }

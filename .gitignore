@@ -5,3 +5,5 @@ obj/
 # them) stay on the machine.
 app-data*.db
 app-data*.db-*
+# Local server settings (such as the Google client ID) stay on the machine.
+ChineseLearningServer/settings.json

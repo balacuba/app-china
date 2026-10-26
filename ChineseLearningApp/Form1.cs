@@ -312,6 +312,7 @@ public sealed partial class Form1 : Form
         };
         // Registered first, so its last sync on close lands before the state is saved.
         InitializeSync();
+        InitializeUpdates();
         // Only study data carries over; the app always opens on Home.
         var appState = AppState.Load();
         _correctAnswerCount = Math.Max(0, appState.CorrectAnswers);
@@ -1643,30 +1644,40 @@ public sealed partial class Form1 : Form
             $"Phóng to hoặc thu nhỏ chữ của mỗi cột trong danh sách từ ({MinimumCellFontSize:0}–{MaximumCellFontSize:0} pt).", fontGrid);
 
         const int headingHeight = 72;
+        const int websiteRowHeight = 340;
         const int syncRowHeight = 266;
+        const int updateRowHeight = 210;
         const int topRowHeight = 450;
         const int bottomRowHeight = 470;
         var fontsRowHeight = 62 + fontRows * 54 + 52 + 34 + 20;
-        var grid = new TableLayoutPanel { ColumnCount = 2, RowCount = 5, BackColor = PageColor };
+        var grid = new TableLayoutPanel { ColumnCount = 2, RowCount = 7, BackColor = PageColor };
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         grid.RowStyles.Add(new RowStyle(SizeType.Absolute, headingHeight));
+        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, websiteRowHeight));
         grid.RowStyles.Add(new RowStyle(SizeType.Absolute, syncRowHeight));
+        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, updateRowHeight));
         grid.RowStyles.Add(new RowStyle(SizeType.Absolute, topRowHeight));
         grid.RowStyles.Add(new RowStyle(SizeType.Absolute, bottomRowHeight));
         grid.RowStyles.Add(new RowStyle(SizeType.Absolute, fontsRowHeight));
         grid.Controls.Add(heading, 0, 0);
         grid.SetColumnSpan(heading, 2);
+        var websiteCard = BuildWebsiteSettingsCard();
+        grid.Controls.Add(websiteCard, 0, 1);
+        grid.SetColumnSpan(websiteCard, 2);
         var syncCard = BuildSyncSettingsCard();
-        grid.Controls.Add(syncCard, 0, 1);
+        grid.Controls.Add(syncCard, 0, 2);
         grid.SetColumnSpan(syncCard, 2);
-        grid.Controls.Add(manageCard, 0, 2);
-        grid.Controls.Add(practiceCard, 1, 2);
-        grid.Controls.Add(columnsCard, 0, 3);
-        grid.Controls.Add(orderCard, 1, 3);
-        grid.Controls.Add(fontsCard, 0, 4);
+        var updateCard = BuildUpdateSettingsCard();
+        grid.Controls.Add(updateCard, 0, 3);
+        grid.SetColumnSpan(updateCard, 2);
+        grid.Controls.Add(manageCard, 0, 4);
+        grid.Controls.Add(practiceCard, 1, 4);
+        grid.Controls.Add(columnsCard, 0, 5);
+        grid.Controls.Add(orderCard, 1, 5);
+        grid.Controls.Add(fontsCard, 0, 6);
         grid.SetColumnSpan(fontsCard, 2);
-        grid.Height = headingHeight + syncRowHeight + topRowHeight + bottomRowHeight + fontsRowHeight;
+        grid.Height = headingHeight + websiteRowHeight + syncRowHeight + updateRowHeight + topRowHeight + bottomRowHeight + fontsRowHeight;
         scroller.Controls.Add(grid);
 
         // Centred, at most 1180px wide; the panel scrolls when the window is short.

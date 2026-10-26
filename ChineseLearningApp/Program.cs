@@ -12,12 +12,28 @@ static class Program
         // see https://aka.ms/applicationconfiguration.
         ApplicationConfiguration.Initialize();
 
-        using var nameForm = new NameEntryForm();
-        if (nameForm.ShowDialog() != DialogResult.OK)
+        // The study website runs for as long as the app does.
+        StudyWebsite.Start();
+        try
         {
-            return;
-        }
+            using var nameForm = new NameEntryForm();
+            if (nameForm.ShowDialog() != DialogResult.OK)
+            {
+                return;
+            }
 
-        Application.Run(new Form1(nameForm.EnteredName));
-    }    
+            Application.Run(new Form1(nameForm.EnteredName));
+        }
+        finally
+        {
+            try
+            {
+                StudyWebsite.StopAsync().Wait(TimeSpan.FromSeconds(3));
+            }
+            catch (AggregateException)
+            {
+                // Closing anyway.
+            }
+        }
+    }
 }
