@@ -49,8 +49,17 @@ function Get-GitHubToken {
         if ($LASTEXITCODE -eq 0 -and $token) { return $token.Trim() }
     }
     if ($env:GITHUB_TOKEN) { return $env:GITHUB_TOKEN }
-    # The credential Git keeps for github.com (Git Credential Manager).
-    $answer = "protocol=https`nhost=github.com`n`n" | & git credential fill 2>$null
+    # The credential Git keeps for github.com (Git Credential Manager). The
+    # request goes in from a file: PowerShell 5 mangles what it pipes to git.
+    $request = [IO.Path]::GetTempFileName()
+    try {
+        [IO.File]::WriteAllText($request, "protocol=https`nhost=github.com`nusername=$($appRepository.Split('/')[0])`n`n", [Text.Encoding]::ASCII)
+        $ErrorActionPreference = "Continue"
+        $answer = & cmd.exe /c "git credential fill < `"$request`" 2>nul"
+        $ErrorActionPreference = "Stop"
+    } finally {
+        Remove-Item -LiteralPath $request -ErrorAction SilentlyContinue
+    }
     $line = $answer | Where-Object { $_ -like "password=*" } | Select-Object -First 1
     if ($line) { return $line.Substring(9) }
     throw "No GitHub permission found. Sign in with 'gh auth login', or set GITHUB_TOKEN."
