@@ -265,6 +265,7 @@ dialog .body { padding: 8px 20px 20px; overflow-y: auto; max-height: calc(80vh -
 /* Sign in with Google, above the name-and-password form. */
 .google-area { display: grid; justify-items: center; gap: 4px; margin-top: 18px; }
 .google-area #google-button { min-height: 44px; }
+.google-note { margin: 0; font-size: 0.85rem; color: var(--muted); text-align: center; line-height: 1.5; }
 .google-link {
   display: inline-flex; align-items: center; justify-content: center; gap: 12px; width: 300px; max-width: 100%; height: 44px;
   border: 1px solid #dadce0; border-radius: 999px; background: #fff; color: #3c4043; font-weight: 600; text-decoration: none;

@@ -210,6 +210,17 @@ async function showGoogleButton(showError) {
   const clientId = siteConfig?.googleClientId;
   const area = view.querySelector('#google-area');
   if (!clientId || !area) return;
+  // Google signs in only on http://localhost or an https:// address with a
+  // domain name; opened by IP (http://192.168.…) it refuses (origin_mismatch).
+  const byIp = /^[\d.]+$|:/.test(location.hostname);
+  if (location.hostname !== 'localhost' && (location.protocol !== 'https:' || byIp)) {
+    view.querySelector('#google-button').innerHTML =
+      `<p class="google-note">Google chỉ cho đăng nhập khi trang được mở bằng <b>http://localhost:${escape(location.port || '80')}</b>
+        trên chính máy chạy app, hoặc qua địa chỉ <b>https://</b> có tên miền, không cho qua địa chỉ IP như
+        <b>${escape(location.host)}</b>. Ở đây hãy dùng tên đăng nhập và mật khẩu.</p>`;
+    area.hidden = false;
+    return;
+  }
   if (siteConfig.googleRedirectLogin) {
     // Google's own sign-in page, which also asks to use Gemini for the learner;
     // it comes back to this page (or to the desktop app's request).
