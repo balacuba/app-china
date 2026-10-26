@@ -83,8 +83,18 @@ public sealed partial class Form1
             var address = StudyWebsite.AllowOthers
                 ? StudyWebsite.NetworkAddresses().FirstOrDefault() ?? StudyWebsite.LocalAddress
                 : StudyWebsite.LocalAddress;
-            Clipboard.SetText(internetAddress?.StartsWith("http", StringComparison.Ordinal) == true ? internetAddress : address);
-            note.Text = "Đã sao chép địa chỉ.";
+            var text = internetAddress?.StartsWith("http", StringComparison.Ordinal) == true ? internetAddress : address;
+            try
+            {
+                // Another program (a clipboard manager, Remote Desktop…) may hold
+                // the clipboard for a moment: try a few times.
+                Clipboard.SetDataObject(text, copy: true, retryTimes: 10, retryDelay: 100);
+                note.Text = $"Đã sao chép: {text}";
+            }
+            catch (System.Runtime.InteropServices.ExternalException)
+            {
+                note.Text = $"Chưa sao chép được (bộ nhớ tạm đang bận). Địa chỉ: {text}";
+            }
         }, secondary: true);
         var firewallButton = CreateButton("🛡  Mở cổng tường lửa", async (sender, _) =>
         {
